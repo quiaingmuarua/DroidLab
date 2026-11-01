@@ -91,6 +91,75 @@ class EmulatorLifecycleTests(unittest.TestCase):
         emulator.subprocess.Popen.assert_called_once()
         self.assertTrue(emulator.subprocess.Popen.call_args.kwargs['start_new_session'])
         self.assertFalse((self.args.output / 'cleanup.json').exists())
+        self.assertEqual(self.info, state['processIdentityObservations'][-1]['process'])
+
+    def test_launcher_exec_observation_waits_for_the_complete_owned_identity(self):
+        self.launch()
+        partial = {**self.info, 'command': '[emulator]'}
+        emulator.process_info.side_effect = [partial, self.info]
+        with patch.object(emulator.time, 'sleep') as sleep:
+            state = emulator.start(self.args)
+        self.assertEqual('passed', state['status'])
+        self.assertEqual([partial, self.info], [item['process'] for item in state['processIdentityObservations']])
+        sleep.assert_called_once()
+        emulator.subprocess.Popen.assert_called_once()
+
+    def test_missing_initial_ps_snapshot_does_not_accept_an_unverified_process(self):
+        self.launch()
+        emulator.process_info.side_effect = [None, self.info]
+        with patch.object(emulator.time, 'sleep'):
+            state = emulator.start(self.args)
+        self.assertEqual('passed', state['status'])
+        self.assertIsNone(state['processIdentityObservations'][0]['process'])
+        self.assertEqual(self.info['started'], state['processStarted'])
+
+    def test_incorrect_avd_never_passes_and_cleanup_refuses_the_mismatched_process(self):
+        self.launch()
+        foreign = {**self.info, 'command': self.info['command'].replace('agentforge-test', 'foreign-avd')}
+        emulator.process_info.return_value = foreign
+        with patch.object(emulator.time, 'monotonic', side_effect=[0, 0, 6, 6]), \
+             patch.object(emulator.time, 'sleep'), \
+             patch.object(emulator, 'group_members', return_value=[5500]), \
+             patch.object(emulator.os, 'killpg') as kill:
+            with self.assertRaisesRegex(TimeoutError, 'identity.*5 seconds'):
+                emulator.start(self.args)
+        kill.assert_not_called()
+        self.assertEqual('failed', self.state()['status'])
+        self.assertEqual('failed', self.cleanup_result()['status'])
+        self.assertTrue(self.state()['avdOwned'])
+        self.assertEqual(foreign, self.state()['processIdentityObservations'][0]['process'])
+
+    def test_changed_start_identity_during_acquisition_fails_without_signalling(self):
+        self.launch()
+        partial = {**self.info, 'command': '[emulator]'}
+        replaced = {**self.info, 'started': 'Wed Oct 21 12:00:00 2026'}
+        emulator.process_info.side_effect = [partial, replaced, replaced]
+        with patch.object(emulator.time, 'sleep'), \
+             patch.object(emulator, 'group_members', return_value=[5500]), \
+             patch.object(emulator.os, 'killpg') as kill:
+            with self.assertRaisesRegex(RuntimeError, 'start identity changed'):
+                emulator.start(self.args)
+        kill.assert_not_called()
+        self.assertEqual('failed', self.cleanup_result()['status'])
+        self.assertTrue(self.state()['avdOwned'])
+
+    def test_changed_process_group_during_acquisition_is_not_retried_or_signalled(self):
+        self.launch()
+        emulator.os.getpgid.return_value = 5501
+        with patch.object(emulator.time, 'sleep') as sleep, patch.object(emulator.os, 'killpg') as kill:
+            with self.assertRaisesRegex(RuntimeError, 'lost its dedicated process group'):
+                emulator.start(self.args)
+        sleep.assert_not_called()
+        kill.assert_not_called()
+        self.assertEqual('failed', self.cleanup_result()['status'])
+
+    def test_ps_requests_full_arguments_and_a_bounded_query(self):
+        output = f"{self.info['started']} 5500 S {self.info['command']}\n"
+        with patch.object(emulator, 'command', return_value=subprocess.CompletedProcess([], 0, output, '')) as command:
+            info = emulator.process_info(5500, timeout=0.5)
+        self.assertEqual(self.info, info)
+        self.assertIn('-ww', command.call_args.args[0])
+        self.assertEqual(0.5, command.call_args.kwargs['timeout'])
 
     def test_port_conflict_does_not_spawn_or_delete_foreign_resources(self):
         self.launch()
@@ -180,7 +249,7 @@ class EmulatorLifecycleTests(unittest.TestCase):
 
     def test_boot_timeout_writes_failure_and_runs_cleanup(self):
         self.launch()
-        with patch.object(emulator.time, 'monotonic', side_effect=[0, 181, 181]), \
+        with patch.object(emulator.time, 'monotonic', side_effect=[0, 0, 0, 181, 181]), \
              patch.object(emulator, 'group_members', side_effect=[[5500], [], [], []]), \
              patch.object(emulator.os, 'killpg'):
             with self.assertRaisesRegex(TimeoutError, '180 seconds'):

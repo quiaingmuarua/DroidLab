@@ -21,6 +21,7 @@ import uuid
 
 ABIS = ('x86_64', 'arm64-v8a')
 BOOT_TIMEOUT = 180
+PROCESS_IDENTITY_TIMEOUT = 5
 
 
 @contextmanager
@@ -58,8 +59,9 @@ def command(argv, *, env=None, timeout=30, input=None, check=True):
     return result
 
 
-def process_info(pid: int):
-    result = command(['ps', '-p', str(pid), '-o', 'lstart=,pgid=,stat=,command='], check=False)
+def process_info(pid: int, *, timeout=30):
+    result = command(['ps', '-ww', '-p', str(pid), '-o', 'lstart=,pgid=,stat=,command='],
+                     check=False, timeout=timeout)
     if result.returncode or not result.stdout.strip():
         return None
     fields = result.stdout.strip().split(None, 7)
@@ -94,6 +96,37 @@ def matches_process(state: dict, info: dict) -> bool:
         )
     except (KeyError, ValueError, IndexError):
         return False
+
+
+def await_process_identity(process, state: dict) -> None:
+    """Observe the owned launcher's exec transition without accepting a partial identity."""
+    deadline = time.monotonic() + PROCESS_IDENTITY_TIMEOUT
+    observations = state['processIdentityObservations'] = []
+    while True:
+        # The Popen handle stays unreaped while running, so its PID cannot be
+        # replaced by another process during this acquisition window.
+        if process.pid != state['pid'] or process.poll() is not None:
+            raise RuntimeError('Emulator exited before its process identity was verified')
+        if os.getpgid(process.pid) != state['pgid']:
+            raise RuntimeError('Spawned emulator lost its dedicated process group')
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f'Emulator process identity did not become verifiable within {PROCESS_IDENTITY_TIMEOUT} seconds')
+        info = process_info(process.pid, timeout=min(1, remaining))
+        observations.append({'observedAt': now(), 'process': info})
+        if info is not None:
+            if info['pgid'] != state['pgid']:
+                raise RuntimeError('Observed emulator process group differs from the owned child')
+            if state['processStarted'] is None:
+                state['processStarted'] = info['started']
+            elif state['processStarted'] != info['started']:
+                raise RuntimeError('Emulator process start identity changed during acquisition')
+            if matches_process(state, info):
+                return
+        # Linux may briefly expose an incomplete command line while the emulator
+        # launcher execs QEMU. The final executable, AVD and port checks remain
+        # mandatory; changed PGID/start identity is never retried.
+        time.sleep(min(0.05, max(0, deadline - time.monotonic())))
 
 
 def validate_coordinates(abi: str, name: str, port: int) -> None:
@@ -330,13 +363,9 @@ def start(args) -> dict:
             # start_new_session establishes PGID == PID before exec; save the
             # acquired child before the fallible ps identity query.
             state.update(pid=process.pid, pgid=process.pid, processOwned=True)
-            info = process_info(process.pid)
-            if info is None:
-                raise RuntimeError('Emulator exited before process identity was captured')
-            state['processStarted'] = info['started']
             write_json(state_path, state)
-        if not matches_process(state, info):
-            raise RuntimeError('Spawned emulator did not retain its dedicated process session')
+        await_process_identity(process, state)
+        write_json(state_path, state)
         deadline = time.monotonic() + BOOT_TIMEOUT
         while time.monotonic() < deadline:
             if process.poll() is not None:
