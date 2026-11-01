@@ -1,0 +1,139 @@
+import com.android.build.api.artifact.SingleArtifact
+
+plugins {
+    id 'com.android.application'
+}
+
+def workerRuntimeApiBaseUrl = providers
+        .gradleProperty('agentforgeWorkerRuntimeApiBaseUrl')
+        .getOrElse('')
+def workerGroupId = providers
+        .gradleProperty('agentforgeWorkerGroupId')
+        .getOrElse('agentforge-detect-env-workers')
+
+def duckSdk = new groovy.json.JsonSlurper().parse(file('duck-sdk.lock.json'))
+def duckAar = rootProject.file(".runtime/duck-detector/sdk/${duckSdk.asset}")
+
+android {
+    namespace 'com.detect.app.sample'
+    compileSdk 37
+    ndkVersion libs.versions.ndk.get()
+
+    defaultConfig {
+        applicationId "com.detect.app.sample"
+        minSdk 29
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+
+        ['TAG': duckSdk.tag, 'COMMIT': duckSdk.commit, 'SHA256': duckSdk.sha256].each { key, value ->
+            buildConfigField 'String', "DUCK_SDK_${key}", groovy.json.JsonOutput.toJson(value)
+        }
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField(
+                'String',
+                'WORKER_RUNTIME_API_BASE_URL',
+                groovy.json.JsonOutput.toJson(workerRuntimeApiBaseUrl)
+        )
+        buildConfigField(
+                'String',
+                'WORKER_GROUP_ID',
+                groovy.json.JsonOutput.toJson(workerGroupId)
+        )
+//        externalNativeBuild {
+//            cmake {
+//                cppFlags ''
+//            }
+//        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+        disable 'HardwareIdDetector'
+        disable 'SoonBlockedPrivateApi'
+        disable 'BlockedPrivateApi'
+        disable 'DiscouragedPrivateApi'
+    }
+    
+//    externalNativeBuild {
+//        cmake {
+//            path file('src/main/cpp/CMakeLists.txt')
+//            version '3.22.1'
+//        }
+//    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+dependencies {
+    implementation files(duckAar)
+    duckSdk.dependencies.each { coordinate -> implementation coordinate }
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+    implementation project(':labs:crackme-native-lib')
+    implementation "com.xa.mass:xa-mass-android-worker:${rootProject.ext.xaMassWorkerSdkVersion}"
+    implementation "com.xa.mass:xa-mass-android-capability-http:${rootProject.ext.xaMassWorkerSdkVersion}"
+    implementation 'com.google.code.gson:gson:2.8.8'
+//    implementation 'org.lsposed.hiddenapibypass:hiddenapibypass:4.3'
+    implementation 'io.github.windysha:bypassHiddenApiRestriction:1.1.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.9.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    implementation 'io.github.happylishang:antifake:1.7.0'
+}
+
+tasks.named('preBuild') {
+    dependsOn ':labs:verifyWorkerSdk', ':labs:verifyDuckSdk'
+}
+
+androidComponents.onVariants(androidComponents.selector().withBuildType('debug')) { variant ->
+    def apkDirectory = variant.artifacts.get(SingleArtifact.APK.INSTANCE)
+    def builtArtifactsLoader = variant.artifacts.getBuiltArtifactsLoader()
+    def currentApk = apkDirectory.map { directory ->
+        def artifacts = builtArtifactsLoader.load(directory)
+        if (artifacts == null || artifacts.elements.size() != 1) {
+            throw new GradleException('Debug APK export requires exactly one APK in the Android artifact metadata.')
+        }
+        def apk = new File(artifacts.elements.iterator().next().outputFile)
+        if (!apk.isFile() || !apk.toPath().normalize().startsWith(directory.asFile.toPath().normalize())) {
+            throw new GradleException('Debug APK metadata does not identify a file inside its Android artifact directory.')
+        }
+        return apk
+    }
+    tasks.register('exportDebugApk', Sync) {
+        group = 'distribution'
+        description = 'Exports the current Debug APK from the Android artifact provider for public CI.'
+        from(currentApk) {
+            rename { 'detect-env-debug.apk' }
+        }
+        into(rootProject.layout.projectDirectory.dir('.runtime/ci/current-apk'))
+    }
+}

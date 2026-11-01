@@ -1,0 +1,30 @@
+
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.app.androidlab.sample.proto";
+
+// 服务定义
+service ExampleService {
+  // 单一请求-单一响应
+  rpc UnaryCall(Request) returns (Response) {}
+
+  // 服务器端流式
+  rpc ServerStreamingCall(Request) returns (stream Response) {}
+
+  // 客户端流式
+  rpc ClientStreamingCall(stream Request) returns (Response) {}
+
+  // 双向流式
+  rpc BidirectionalStreamingCall(stream Request) returns (stream Response) {}
+}
+
+
+// 消息定义
+message Request {
+  string data = 1;
+}
+
+message Response {
+  string result = 1;
+}

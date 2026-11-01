@@ -1,0 +1,387 @@
+name: DroidLab CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: droidlab-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      dex: ${{ steps.select.outputs.dex }}
+      hook: ${{ steps.select.outputs.hook }}
+      labs: ${{ steps.select.outputs.labs }}
+      device: ${{ steps.select.outputs.device }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - id: select
+        name: Select lanes from the full changed-path set
+        run: python3 scripts/ci_changes.py
+
+  checks:
+    name: Documentation and Python contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+      - run: python scripts/check_repository.py
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - run: git diff --check
+
+  dex-jvm:
+    name: Dex JVM (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.dex == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+      - name: JVM tests and installed CLI without Android
+        run: ./gradlew --no-daemon -Pandroid=false :dexlineage:build :dexlineage:installDist
+      - name: Check installed launcher and notices
+        run: |
+          build/install/dexlineage/bin/dexlineage --version
+          build/install/dexlineage/bin/dexlineage --help
+          test -s build/install/dexlineage/LICENSE
+          test -s build/install/dexlineage/THIRD_PARTY_NOTICES.md
+          test -s build/install/dexlineage/licenses/smali-LICENSE.txt
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: dex-jvm-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dexlineage/**/build/reports/tests/**
+            dexlineage/**/build/test-results/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  dex-r8:
+    name: Dex R8 fixtures and production CLI
+    needs: changes
+    if: needs.changes.outputs.dex == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+      - name: Install Android fixture build inputs
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            'platform-tools' 'platforms;android-33' 'platforms;android-34' \
+            'platforms;android-35' 'platforms;android-37.0' 'build-tools;36.0.0' \
+            'ndk;27.0.12077973' 'cmake;3.22.1'
+      - run: ./gradlew --no-daemon :dexlineage:fixtureIntegrationTest
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: dex-r8-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dexlineage/cli/build/reports/tests/fixtureIntegrationTest/**
+            dexlineage/cli/build/test-results/fixtureIntegrationTest/**
+            dexlineage/cli/build/fixture-integration/**
+            dexlineage/fixtures/android/build/fixture-inputs/**
+            dexlineage/fixtures/android/build/outputs/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  hook:
+    name: Hook host checks and one production artifact
+    needs: changes
+    if: needs.changes.outputs.hook == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: hookforge/.node-version
+          cache: npm
+          cache-dependency-path: hookforge/package-lock.json
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Host suite followed by production build and verification
+        run: ./gradlew --no-daemon -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: hook-production-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            hookforge/dist/bundle.js
+            hookforge/dist/android-api.js
+            hookforge/dist/node-cli/*.js
+            .runtime/hookforge/production-manifest.json
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+
+  labs:
+    name: Android lab unit tests and Debug assembly
+    needs: changes
+    if: needs.changes.outputs.labs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Install Android lab build inputs
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            'platform-tools' 'platforms;android-33' 'platforms;android-34' \
+            'platforms;android-35' 'platforms;android-37.0' 'build-tools;36.0.0' \
+            'ndk;27.0.12077973' 'cmake;3.22.1'
+      - name: Explicitly prepare locked public SDK inputs
+        run: |
+          python -m droidlab_tools release resolve --component worker-sdk --lock XA_MASS_RELEASE.lock.json
+          python -m droidlab_tools duck-sdk resolve
+      - name: Test and build all three lab modules
+        run: ./gradlew --no-daemon --max-workers=2 -Pandroid.injected.build.abi=x86_64 :labs:check :labs:assemble :labs:detect-env:exportDebugApk
+      - name: Record the current APK bytes and DroidLab source
+        run: |
+          git diff --exit-code
+          python scripts/ci_inputs.py record-apk \
+            --apk .runtime/ci/current-apk/detect-env-debug.apk \
+            --manifest .runtime/ci/current-apk/apk-manifest.json
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: current-lab-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .runtime/ci/current-apk/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: lab-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            labs/**/build/reports/**
+            labs/**/build/test-results/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  frida-api33:
+    name: API33 x86_64 (${{ matrix.input }})
+    needs: [changes, hook, labs]
+    if: needs.changes.outputs.device == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        input: [fixed, current]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ANDROID_SERIAL: emulator-5580
+      INPUT_KIND: ${{ matrix.input }}
+      FRIDA_API33_RESULTS: ${{ github.workspace }}/.runtime/frida-api33/${{ matrix.input }}/results
+      EMULATOR_EVIDENCE: ${{ github.workspace }}/.runtime/frida-api33/${{ matrix.input }}/emulator
+      FRIDA_API33_APK: ${{ github.workspace }}/.runtime/ci/${{ matrix.input }}-apk/detect-env-debug.apk
+      ROOTBEER_APK: ${{ github.workspace }}/.runtime/fixtures/rootbeer.apk
+      PRODUCTION_MANIFEST: ${{ github.workspace }}/.runtime/hookforge/production-manifest.json
+    steps:
+      - uses: actions/checkout@v7.0.1
+        id: checkout
+      - name: Initialize evidence for this APK input
+        if: always()
+        run: mkdir -p "$FRIDA_API33_RESULTS"
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: hookforge/.node-version
+          cache: npm
+          cache-dependency-path: hookforge/package-lock.json
+      - name: Install locked hosts without rebuilding production
+        run: npm --prefix hookforge ci
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: hook-production-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .
+      - name: Verify the single production artifact
+        id: production
+        run: npm --prefix hookforge run artifact:verify -- "$PRODUCTION_MANIFEST"
+      - uses: actions/download-artifact@v8.0.1
+        if: matrix.input == 'current'
+        with:
+          name: current-lab-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .runtime/ci/current-apk
+      - name: Verify current APK or download immutable historical fixture
+        id: inputs
+        run: |
+          if [ "$INPUT_KIND" = current ]; then
+            python scripts/ci_inputs.py verify-apk --apk "$FRIDA_API33_APK" \
+              --manifest .runtime/ci/current-apk/apk-manifest.json
+            cp .runtime/ci/current-apk/apk-manifest.json "$FRIDA_API33_RESULTS/input.json"
+          else
+            python scripts/ci_inputs.py download-fixture --lock hookforge/test/api33/fixture.json --output "$FRIDA_API33_APK"
+            node hookforge/scripts/fixture.mjs "$FRIDA_API33_APK"
+            cp hookforge/test/api33/fixture.json "$FRIDA_API33_RESULTS/input.json"
+          fi
+          cp "$PRODUCTION_MANIFEST" "$FRIDA_API33_RESULTS/production-input.json"
+          node --input-type=module <<'JS' > "$RUNNER_TEMP/rootbeer-lock.json"
+          import { sample } from './hookforge/cases/rootbeer/catalog.mjs';
+          console.log(JSON.stringify({schemaVersion: 1, ...sample.fixture, sha256: sample.sha256}));
+          JS
+          python scripts/ci_inputs.py download-fixture --lock "$RUNNER_TEMP/rootbeer-lock.json" --output "$ROOTBEER_APK"
+          cp "$RUNNER_TEMP/rootbeer-lock.json" "$FRIDA_API33_RESULTS/rootbeer-input.json"
+      - name: Prepare exact Frida Python client and Android server
+        id: toolchain
+        run: |
+          python hookforge/test/api33/prepare.py --abi x86_64 \
+            --tools-root .runtime/toolchain/python --output .runtime/frida-api33/toolchain.json
+      - name: Install rootable API33 image
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            'platform-tools' 'emulator' 'platforms;android-33' 'system-images;android-33;default;x86_64'
+          printf '%s\n' "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+      - name: Verify Android tools on the test process PATH
+        run: |
+          command -v adb
+          adb version
+      - name: Require KVM acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=10
+          sudo chmod 0666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Start this job's owned emulator
+        id: emulator
+        run: |
+          python hookforge/test/api33/emulator.py start --sdk-root "$ANDROID_HOME" \
+            --avd-home "$RUNNER_TEMP/droidlab-avd" --avd-name "droidlab_${INPUT_KIND}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
+            --port 5580 --abi x86_64 --output "$EMULATOR_EVIDENCE"
+      - name: Full Python and Node attach/spawn suite
+        id: suite
+        run: |
+          python hookforge/test/api33/suite.py --abi x86_64 --apk "$FRIDA_API33_APK" \
+            --serial "$ANDROID_SERIAL" --toolchain .runtime/frida-api33/toolchain.json \
+            --production-manifest "$PRODUCTION_MANIFEST" --output "$FRIDA_API33_RESULTS"
+      - name: RootBeer plus the same installed detect-env APK
+        id: rootbeer
+        if: ${{ !cancelled() && steps.emulator.outcome == 'success' && steps.production.outcome == 'success' && steps.inputs.outcome == 'success' }}
+        run: |
+          npm --prefix hookforge run case:rootbeer -- --abi x86_64 --apk "$ROOTBEER_APK" \
+            --serial "$ANDROID_SERIAL" --reuse-detect-env \
+            --agent "$GITHUB_WORKSPACE/hookforge/dist/android-api.js" \
+            --production-manifest "$PRODUCTION_MANIFEST" --output "$FRIDA_API33_RESULTS/rootbeer"
+      - name: Stop only this job's emulator and remove its owned AVD
+        id: cleanup
+        if: always()
+        run: |
+          if [ -f hookforge/test/api33/emulator.py ]; then
+            python hookforge/test/api33/emulator.py stop --output "$EMULATOR_EVIDENCE"
+          fi
+      - name: Bind every observed APK to this matrix input and production artifact
+        id: input-evidence
+        if: always()
+        run: |
+          python scripts/ci_inputs.py verify-results --apk "$FRIDA_API33_APK" \
+            --output "$FRIDA_API33_RESULTS" --production-manifest "$PRODUCTION_MANIFEST"
+      - name: Report all mechanism, shared API and cleanup results
+        id: report
+        if: always()
+        env:
+          FRIDA_JOB_STATUS: ${{ job.status }}
+          FRIDA_STEP_RESULTS: ${{ toJSON(steps) }}
+        run: |
+          if [ -f hookforge/test/api33/report.py ]; then
+            python hookforge/test/api33/report.py --abi x86_64 --output "$FRIDA_API33_RESULTS" \
+              --case-result "$FRIDA_API33_RESULTS/rootbeer/result.json" \
+              --cleanup-result "$EMULATOR_EVIDENCE/cleanup.json"
+          else
+            python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['FRIDA_API33_RESULTS'])
+          root.mkdir(parents=True, exist_ok=True)
+          (root / 'job-result.json').write_text(json.dumps({'status': 'failed', 'stage': 'checkout',
+              'steps': json.loads(os.environ['FRIDA_STEP_RESULTS'])}, indent=2) + '\n')
+          raise SystemExit('Checkout failed before reporting tools were available')
+          PY
+          fi
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: frida-api33-${{ matrix.input }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .runtime/frida-api33/${{ matrix.input }}/**
+            .runtime/frida-api33/toolchain.json
+            !.runtime/frida-api33/**/installed-detect-env.apk
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn
+
+  ci:
+    name: Required CI result
+    if: always()
+    needs: [changes, checks, dex-jvm, dex-r8, hook, labs, frida-api33]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every selected lane to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          jobs = json.loads(os.environ['RESULTS'])
+          expected = ['changes', 'checks']
+          selection = jobs['changes']['outputs']
+          for flag, lanes in {'dex': ['dex-jvm', 'dex-r8'], 'hook': ['hook'],
+                              'labs': ['labs'], 'device': ['frida-api33']}.items():
+              if selection.get(flag) == 'true':
+                  expected.extend(lanes)
+          failed = {name: jobs[name]['result'] for name in expected if jobs[name]['result'] != 'success'}
+          if failed:
+              raise SystemExit(f'Required DroidLab lanes failed or did not run: {failed}')
+          print('Every selected DroidLab lane passed.')
+          PY

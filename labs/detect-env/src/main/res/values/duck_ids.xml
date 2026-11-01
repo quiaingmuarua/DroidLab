@@ -1,0 +1,9 @@
+<resources>
+    <item name="duck_scan_button" type="id" />
+    <item name="duck_output" type="id" />
+    <item name="duck_status" type="id" />
+    <item name="duck_toggle" type="id" />
+    <item name="duck_copy" type="id" />
+    <item name="duck_export_txt" type="id" />
+    <item name="duck_export_json" type="id" />
+</resources>

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "repository": "quiaingmuarua/xa_mass_platform",
+  "version": "3.1.0",
+  "gitCommit": "15a9351d8f26d66ad1bf98349bd5c36f6284cbcd",
+  "assets": {
+    "serverRuntime": {
+      "assetName": "xa-mass-server-runtime-3.1.0.zip",
+      "sha256": "0bfb929eb8b51e1826b0df40cfb4dfffbaaff4951cdcc558d87c003d81429f46"
+    },
+    "workerSdk": {
+      "assetName": "xa-mass-worker-sdk-3.1.0.zip",
+      "sha256": "74e768d6977d6ebdaf767c103341face64c43a9b66d1919b6029d22c05037aae"
+    }
+  }
+}

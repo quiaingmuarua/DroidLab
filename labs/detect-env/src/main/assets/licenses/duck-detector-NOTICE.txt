@@ -1,0 +1,9 @@
+Duck Detector SDK
+Copyright 2026 Duck Apps Contributor
+Licensed under the Apache License, Version 2.0; see duck-detector-LICENSE.txt.
+
+Original project: https://github.com/eltavine/Duck-Detector-Refactoring
+Release: nightly-2026-10-19-d3a085e3
+Commit: d3a085e3eaedeb160eda0566e43c3535675a190b
+The original SDK AAR is consumed unchanged. AgentForge provides the host UI,
+SDK lifecycle wiring and JSON projection, not the detector implementations.
