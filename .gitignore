@@ -1,0 +1,23 @@
+# Generated build, tool and local state
+.DS_Store
+.idea/
+**/.idea/
+.gradle/
+**/.gradle/
+.kotlin/
+**/.kotlin/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+**/node_modules/
+**/dist/
+**/__pycache__/
+*.pyc
+**/.venv/
+.runtime/
+**/.runtime/
+.local/
+**/.local/
+local.properties
+**/local.properties
+*.iml

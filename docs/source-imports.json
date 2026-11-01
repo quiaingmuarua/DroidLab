@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "DexLineage": {
+      "commit": "687e09cf7dcddd8f1a3b16186ed702d11e459cba",
+      "repository": "https://github.com/quiaingmuarua/DexLineage.git",
+      "destination": "dexlineage"
+    },
+    "HookForge": {
+      "commit": "252743be1f383d3553daef0757879ec6877c2cd2",
+      "repository": "https://github.com/quiaingmuarua/HookForge.git",
+      "destination": "hookforge"
+    },
+    "AgentForge": {
+      "commit": "9fc7c0017a0ca9447af99465d168d1c613d554ca",
+      "repository": "https://github.com/quiaingmuarua/DroidWorks.git",
+      "destination": "labs"
+    }
+  },
+  "method": "tracked-source snapshots; no source repository mutation",
+  "excluded": [
+    "nested Git metadata and wrappers",
+    "source workflows (adapted at DroidLab root)",
+    "labs/detect-env/host (private deployment proof)"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "repository": "eltavine/Duck-Detector-Refactoring",
+  "tag": "nightly-2026-10-19-d3a085e3",
+  "commit": "d3a085e3eaedeb160eda0566e43c3535675a190b",
+  "asset": "duckdetector-sdk-nightly-2026-10-19-d3a085e3.aar",
+  "sha256": "ceee8845e3eb1395b9ef7205666111ead2738c5a9082cfe6bed338f59145f39d",
+  "license": "Apache-2.0",
+  "dependencySource": "sdk/aar Maven publication: headlessSdkModules plus compileForSdkHosts at the pinned commit",
+  "dependencies": [
+    "org.jetbrains.kotlin:kotlin-stdlib:2.3.21",
+    "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0",
+    "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0",
+    "androidx.annotation:annotation:1.11.0",
+    "androidx.datastore:datastore-preferences:1.2.1",
+    "org.bouncycastle:bcprov-jdk18on:1.86",
+    "org.lsposed.hiddenapibypass:hiddenapibypass:6.2",
+    "com.github.Tencent.soter:soter-core:2.0.7"
+  ]
+}

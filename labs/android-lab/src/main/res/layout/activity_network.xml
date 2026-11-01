@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#F5F5F5"
+    tools:context=".sample.network.NetworkActivity">
+
+    <!-- 标题区域 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🌐 网络请求测试工具"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#2C3E50"
+        android:gravity="center"
+        android:layout_marginBottom="20dp" />
+
+    <!-- URL 选择区域 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/card_background"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎯 选择测试 URL"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#34495E"
+            android:layout_marginBottom="12dp" />
+
+        <Spinner
+            android:id="@+id/url_spinner"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginBottom="8dp"
+            android:spinnerMode="dropdown"
+            android:background="?android:attr/selectableItemBackground"
+            android:padding="12dp" />
+
+        <TextView
+            android:id="@+id/url_description"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="请选择一个测试URL"
+            android:textSize="12sp"
+            android:textColor="#7F8C8D"
+            android:layout_marginTop="4dp" />
+
+    </LinearLayout>
+
+    <!-- 网络库选择区域 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:background="@drawable/card_background"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📚 选择网络库"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#34495E"
+            android:layout_marginBottom="12dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/network_library_recycler_view"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="#FFFFFF"
+            android:nestedScrollingEnabled="true" />
+
+    </LinearLayout>
+
+    <!-- 测试按钮区域 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/test_button"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:text="🚀 开始测试"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/test_button_background"
+            android:enabled="false"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/clear_button"
+            android:layout_width="wrap_content"
+            android:layout_height="56dp"
+            android:text="🗑️ 清除"
+            android:textSize="16sp"
+            android:textColor="#E74C3C"
+            android:background="@drawable/clear_button_background"
+            android:layout_marginStart="8dp"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

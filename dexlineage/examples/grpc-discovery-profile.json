@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 4,
+  "id": "grpc-example",
+  "strategy": {
+    "strategyId": "grpc-java.rpc-discovery",
+    "parameters": {},
+    "resultKind": "CLASS",
+    "requires": {"nameFactory": "grpc.full-name"}
+  },
+  "method": {
+    "methodId": "messages.grpc",
+    "parameters": {
+      "reviewServices": ["example.Service"],
+      "requestSuffix": "Request",
+      "responseSuffix": "Response"
+    }
+  }
+}
