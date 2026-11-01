@@ -16,24 +16,23 @@ not start an emulator, replace a running server or clear app data.
 Prepare the matching client/server as described in
 [environment preparation](../../test/api33/README.md#环境准备). This runner
 currently installs with `adb install -r` and requires a non-`testOnly`
-detect-env APK. Build it in the external consuming project (such as AgentForge)
-using that project's preparation instructions and normal Debug assembly,
+detect-env APK. Build it from DroidLab `labs/detect-env`
+using the root preparation instructions and normal Debug assembly,
 without `android.injected.build.abi`; pass the resulting APK through `--apk`.
 
 The [fixed test APK](../../test/api33/README.md#固定测试-apk) is marked
 `testOnly`. It is supported by the API33 suite, whose installer uses
 `adb install -r -t`, but cannot be passed directly to this Duck runner.
 
-From the HookForge root, with the external APK path substituted:
+From the DroidLab root, with the external APK path substituted:
 
 ```bash
-npm run build:prod
-npm run artifact:write
-npm run case:duck-system-properties -- \
+./gradlew -Pandroid=false :hookforge:verifyProductionArtifact
+npm --prefix hookforge run case:duck-system-properties -- \
   --apk "/path/to/detect-env-debug.apk" \
   --serial emulator-5554 \
-  --agent "dist/android-api.js" \
-  --production-manifest ".runtime/frida-api33/production-manifest.json"
+  --agent "hookforge/dist/android-api.js" \
+  --production-manifest ".runtime/hookforge/production-manifest.json"
 ```
 
 The production manifest must belong to this checkout and Node toolchain. The

@@ -1,10 +1,10 @@
 # Third-party notices
 
-DexLineage's own source and public fixture source are licensed under [Apache-2.0](LICENSE). The installed CLI also contains the following unmodified libraries. This inventory covers the resolved runtime distribution for version 0.4.0; it does not change their licenses. Dependency versions remain unchanged from 0.3.0.
+DexLineage's own source and public fixture source are licensed under [Apache-2.0](LICENSE). The installed CLI also contains the following unmodified libraries. This inventory covers the resolved runtime distribution for version 0.4.0; it does not change their licenses. DroidLab updates the Kotlin runtime with its unified Kotlin compiler; the other runtime dependencies retain their pinned versions.
 
 | Artifact | Version | License and accompanying text |
 |---|---|---|
-| `org.jetbrains.kotlin:kotlin-stdlib` | 2.2.10 | Apache-2.0; [license](LICENSE) |
+| `org.jetbrains.kotlin:kotlin-stdlib` | 2.4.21 | Apache-2.0; [license](LICENSE) |
 | `org.jetbrains:annotations` | 13.0 | Apache-2.0; [license](LICENSE) |
 | `io.github.skylot:jadx-core`, `jadx-dex-input`, `jadx-input-api`, `jadx-rename-mappings` | 1.5.0 | Apache-2.0; [license](LICENSE) |
 | `com.google.code.gson:gson` | 2.10.1 | Apache-2.0; [license](LICENSE) |
@@ -22,8 +22,8 @@ DexLineage's own source and public fixture source are licensed under [Apache-2.0
 
 License declarations were checked against the resolved artifacts' published POMs (including inherited parent POMs), embedded license files and the upstream release license. Copyright and permission notices are preserved in `licenses/`; the dependencies retain their own notices inside their original JARs as well.
 
-The Gradle 8.11.1 Wrapper is included in the source checkout under Apache-2.0. [Gradle's distribution license](licenses/gradle-LICENSE.txt) and [NOTICE](licenses/gradle-NOTICE.txt) are preserved for reference, including its third-party acknowledgments. Gradle, Android SDK, AGP and R8 are build tools downloaded separately; they are not bundled in the DexLineage CLI distribution. Android SDK components retain their SDK license terms.
+The single Gradle 9.7 Wrapper is owned by the DroidLab root. The following license texts were preserved from the original DexLineage Gradle 8.11.1 distribution as historical attribution. [Gradle's distribution license](licenses/gradle-LICENSE.txt) and [NOTICE](licenses/gradle-NOTICE.txt) are preserved for reference, including its third-party acknowledgments. Gradle, Android SDK, AGP and R8 are build tools downloaded separately; they are not bundled in the DexLineage CLI distribution. Android SDK components retain their SDK license terms.
 
-The public Android fixture APKs also contain `com.google.protobuf:protobuf-javalite:3.25.3` under BSD-3-Clause. Its [license](licenses/protobuf-LICENSE.txt) is included in fixture APK assets. Fixture source generation uses the Apache-2.0 Protobuf Gradle plugin 0.9.4 and BSD-3-Clause protoc 3.25.3 as build tools. These additions do not add libraries to the installed DexLineage CLI.
+The public Android fixture APKs also contain `com.google.protobuf:protobuf-javalite:3.25.3` under BSD-3-Clause. Its [license](licenses/protobuf-LICENSE.txt) is included in fixture APK assets. Fixture source generation uses the Apache-2.0 Protobuf Gradle plugin 0.10.0 and BSD-3-Clause protoc 3.25.3 as build tools. These additions do not add libraries to the installed DexLineage CLI.
 
 When changing dependency versions, inspect the actual `build/install/dexlineage/lib` contents and update this inventory and accompanying texts. Test-only libraries and CI Actions are not included in the CLI runtime.

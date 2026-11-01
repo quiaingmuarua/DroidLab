@@ -1,6 +1,6 @@
 # Native Lib Agent README
 
-This document explains how to work in `crackme:crackme-native-lib`.
+This document explains how to work in `labs:crackme-native-lib`.
 
 ## 1. Module Goal
 

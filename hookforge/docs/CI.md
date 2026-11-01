@@ -1,75 +1,62 @@
-# Independent CI and optional AgentForge integration
+# DroidLab CI and HookForge provenance
 
-HookForge is a public, standalone Frida tool. Its clean public baseline comes
-from the reviewed pre-publication tool snapshot. Earlier history is preserved
-in separately retained private backups; project-specific capture/detection
-research stays in AgentForge's `frida-projects/`. Neither is published through
-this repository.
-APKs, real traffic, device collections and runtime evidence are not Git sources.
+HookForge is source in DroidLab's `hookforge/` module. The root Gradle Wrapper
+and root `.github/workflows/` own its build and CI. There is no nested Git
+repository, submodule upgrade or independent HookForge development entrypoint.
+Private target research and consumer deployments remain outside DroidLab.
 
-## Local commands
+## Local host gate
 
-The following commands reproduce the shared host gate. Run from the HookForge
-root using the Node version in `.node-version`. For a sample task or
-documentation edit, select the relevant checks from the
-[Testing Strategy](TESTING_STRATEGY.md).
+Run from the DroidLab root with Node from `hookforge/.node-version` on PATH:
 
 ```bash
-npm ci
-npm run build:prod
-npm run cli -- list
-npm run cli -- plan --replace root,system-properties --trace file-io,system-properties
-npm run test:ci
-npm run build:prod
-npm run artifact:write
-npm run artifact:verify
+./gradlew -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact
+npm --prefix hookforge run cli -- list
+npm --prefix hookforge run cli -- plan --replace root,system-properties --trace file-io,system-properties
 ```
 
-The `af-frida` bin and existing case/sample commands retain their names. Default
-downloads and toolchains belong to this checkout's `.runtime/`. Composable CLI
-results belong to the calling project's `.runtime/`. Existing absolute inputs
-and caller-relative command arguments remain supported.
+The module keeps its npm lockfile and reviewed Java bridge patch.
+`:hookforge:npmCi` installs both. `check` runs the existing source, unit, tool,
+generated-host and development-build checks. `assemble` builds production.
+When both are requested, production runs after the development check so that
+`dist/` cannot silently revert to development bytes. The verification task
+writes `.runtime/hookforge/production-manifest.json` at the DroidLab root.
 
-## Ubuntu CI
+The `af-frida` bin and case commands retain their names. The root commands use
+`npm --prefix hookforge`; an optional npm link points at this source module.
+Composable CLI paths and default run output belong to the caller. Legacy and
+case runners retain their documented path rules; use absolute APK/artifact
+paths and an explicit root `.runtime/` output when invoking them through npm.
 
-The `frida` job checks source and tools and builds production artifacts. The
-dependent `frida-api33` job consumes those exact bytes on API33 x86_64, runs
-Python/Node × attach/spawn, then RootBeer with detect-env reuse. Reports retain
-separate runtime-mechanism and shared-API proofs; required evidence or cleanup
-failure fails the job. Evidence is retained seven days.
+## Source identity and fixtures
 
-Both APKs come from immutable test Releases in this repository, using the job's
-read-only `GITHUB_TOKEN`. RootBeer coordinates/hash live in its existing catalog;
-detect-env coordinates, hash, package/ABI and clean-build provenance live in
-`test/api33/fixture.json`. Download and verify before installing. Releases are
-prereleases, never Latest; never overwrite mismatched existing assets.
+Production manifest schema 2 retains `commit`. Runtime case/suite/job schema 3
+retains `checkoutCommit` where present. Both identify the owning **DroidLab
+commit**, not a historical standalone HookForge commit. Tool paths, lock hashes,
+bridge patch identity and artifact file hashes remain module-relative.
+Git resolves the repository above `hookforge/`; `hookforge/.git` must not exist.
+An optional external `consumerCommit` remains separate consumer evidence.
 
-CI neither checks out AgentForge nor resolves/builds its Worker SDK or Duck AAR.
-Refresh detect-env only when its test contract or required capabilities change:
-build a clean, recorded AgentForge commit; publish a new test tag/asset; update
-the fixture declaration and run both proof scopes. Never select a latest APK.
+RootBeer coordinates and hash stay in `cases/rootbeer/catalog.mjs`.
+The fixed detect-env APK coordinates, hash and historical build provenance stay
+in `test/api33/fixture.json`. Both immutable assets continue to be downloaded
+from the original public `quiaingmuarua/HookForge` Releases and verified before
+installation. Their old source repository/commit describe the actual historical
+APK build and must not be relabeled as a DroidLab build. This integration does
+not publish, replace or upload a Release, and never selects a latest APK.
 
-Markdown-only changes skip CI. Manual dispatch runs both jobs. Tool provenance
-always uses the HookForge checkout SHA. Runtime/suite/job report schema 3 uses
-`checkoutCommit`; production manifest schema 2 and case schemas remain unchanged.
+## Device evidence
 
-## AgentForge consumption
+The public Linux baseline is API33 x86_64. The fixed-fixture suite keeps four
+Python/Node × attach/spawn mechanism cases, then RootBeer with detect-env reuse
+and recovery using the same production bytes. Its report requires complete
+mechanism and shared-API evidence; setup, behavior or cleanup failures fail.
 
-AgentForge keeps `frida/` as a submodule pinned to a tested HookForge commit.
-Develop HookForge independently; an ordinary new commit does not update that pin
-or trigger the consumer CI. Updating AgentForge is an explicit upgrade, not a
-per-commit requirement.
+An APK built from current DroidLab `labs/` is a separate input with its own
+build/install hash and integration result. A targeted current-lab result cannot
+be reported as the complete four-case fixed-fixture suite. See the root workflow
+for the selected checks and [Testing Strategy](TESTING_STRATEGY.md) for acceptance.
 
-The parent retains its Ubuntu integration and trusted macOS ARM64 runner. These
-build the parent's current detect-env and use the fixed child tools. The macOS
-runner is not registered with HookForge and no ARM64 CI claim is made here.
-
-AgentForge consumes a fixed public HookForge commit without the former deploy
-key. The old private archive and its deploy key have been retired. Historical
-pins that refer to pre-publication commits require the separately retained
-private history to reproduce; those commits are absent from the public history.
-Consumers keep their own RootBeer Release mirror where needed; integration
-reports distinguish tool SHA from consumer SHA.
-
-Clone/init/update instructions and parent-owned build inputs belong to
-AgentForge's build guide. Hooks, sample scripts and independent checks belong here.
+This migration adds no macOS runner or ARM64 CI coverage. The retained ARM64
+tooling can be invoked explicitly in a suitable environment; it does not prove
+that such a machine or workflow is available. See [macOS scope](MACOS_RUNNER.md).

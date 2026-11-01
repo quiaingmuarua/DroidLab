@@ -5,8 +5,10 @@ problems solved and repeated investigation/debugging saved. Adding scripts,
 modules or passing CI alone does not establish that value.
 
 Read [README.md](README.md), then the nearest sample or owner needed for the
-task. This is a standalone tool repository with no Gradle build. Read other
-guides when the task needs them.
+task. HookForge is the `hookforge/` source module in DroidLab. Use the root
+Gradle Wrapper; there is no nested repository, wrapper or submodule. Read
+other guides when the task needs them. Commands in this guide run from the
+DroidLab root.
 
 ## Default work loop
 
@@ -42,8 +44,8 @@ Its `--script` option does not accept naked Frida scripts. See the
   major changes such as substantial runtime/API changes or broad refactoring.
   Inspect the current branch and worktree first, preserve existing work and
   branch choices, and do not create a new branch for every task.
-- HookForge evolves independently. AgentForge pins an explicit submodule commit
-  and upgrades when needed; do not automatically change the consumer repository.
+- Shared HookForge changes belong to the DroidLab commit. Keep private consumer
+  upgrades and deployment outside this repository.
 - Choose the closest verification: actual target behavior for sample work;
   relevant tests, build and affected attach/spawn smoke for shared runtime
   changes; links and command ownership for documentation. Broaden checks for
@@ -51,7 +53,9 @@ Its `--script` option does not accept naked Frida scripts. See the
 - Existing public capability cases retain their reuse and restoration checks.
   See [Testing Strategy](docs/TESTING_STRATEGY.md) and [CI](docs/CI.md). A script
   loading or an API being hit alone does not prove the requested App outcome.
-- Use Windows Git Bash and native Windows tools locally; do not use WSL.
+- On Windows use Git Bash and native Windows tools; do not use WSL. Linux and
+  macOS host checks use their native Node/Python tools; host checks are not
+  evidence of Android device coverage.
 
 ## Detection Intervention Contract
 
@@ -83,12 +87,12 @@ can be useful.
 
 - `apps/<sample>/`: public integration examples, special startup and usage.
   Private/project-specific scripts stay with their consumer, such as
-  AgentForge's `frida-projects/`.
+  a private consumer's research directory.
 - `cases/`: existing repeatable target acceptance and read-only adapters.
 - `packages/modules/`: reusable runtime behavior; `packages/runtime/` and
   `packages/core/`: bridges and helpers; `packages/events/`: normalized output.
 - `hosts/node-cli/`: host execution. Edit TypeScript and regenerate checked-in
-  development JavaScript with `npm run build:hosts`.
+  development JavaScript with `npm --prefix hookforge run build:hosts`.
 - Existing recipes, configs and registries retain their execution paths;
   registration is not required for every new experiment.
 - `api-hooks.ts` and `api-runtime.ts` under `packages/modules/android-runtime-bypass`
@@ -98,7 +102,7 @@ can be useful.
   `third_party_readonly/`; cache, builds and evidence use the working project's
   `.runtime/`. Preserve unrelated work, original samples and local evidence;
   keep APKs, AARs, downloaded tools and real traffic out of Git. Do not search
-  parent directories for an AgentForge checkout. Preserve
+  parent directories for another checkout. Preserve
   `.runtime/analysis/dynamic`, used by existing recipes.
 - Bundled Java code uses the shared Java bridge and `performOnJava`; Node
   bundles cannot assume a global Java bridge. See
@@ -107,10 +111,16 @@ can be useful.
   activation/deactivation and strict-mode behavior for Stalker/qBDI and other
   stateful engines. Sample work needs cleanup appropriate to its side effects.
 
-Node is pinned in `.node-version`. `npm ci` applies the reviewed Java bridge
-patch; keep install lifecycle scripts enabled. `npm run check:bridge-patch`
-verifies the installed bytes. Existing CI keeps type/lint/unit/tool checks,
-generated-host consistency, production validation and documented device proofs.
+Node is pinned in `hookforge/.node-version`. Use root
+`./gradlew -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact`.
+`:hookforge:npmCi` applies the reviewed Java bridge patch; keep install lifecycle
+scripts enabled. `npm --prefix hookforge run check:bridge-patch` verifies the
+installed bytes. Gradle orders the development check before a production build
+when both are requested. CI keeps type/lint/unit/tool checks, generated-host
+consistency, production validation and the documented API33 x86_64 proof.
+Manifest `commit` and runtime `checkoutCommit` identify DroidLab, while module
+files remain relative to `hookforge/`. Pass explicit root `.runtime/` paths for
+shared CI evidence; preserve historical fixture source metadata.
 
 - [Script integration](docs/SCRIPT_INTEGRATION_GUIDE.md)
 - [Event format](docs/EVENT_SCHEMA.md)

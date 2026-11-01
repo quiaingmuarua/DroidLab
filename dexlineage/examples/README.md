@@ -2,7 +2,7 @@
 
 `rpc-related-rules.json` demonstrates a two-round descriptor METHOD anchor followed by reviewed descriptor, builder and declared marshaller-interface class targets. Related rules take only `role`; service/RPC/label configuration stays with the producer. Use `analysis research --corpus ... --target ... --out ...` to inspect manual source targets before authoring such rules. Research output cannot replace a matched run's evidence.
 
-All current examples use `schemaVersion: 4` and illustrative public strings. Copy them into `.local/` before adding application-specific data. They contain no expected obfuscated targets or private paths.
+All current examples use `schemaVersion: 4` and illustrative public strings. Copy them into a private workspace outside DroidLab before adding application-specific data. Run the root-built CLI from the DroidLab root and supply those external paths explicitly. They contain no expected obfuscated targets or private paths.
 
 ## Discovery profile
 

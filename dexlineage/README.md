@@ -11,14 +11,14 @@ Supporting CLASS or METHOD anchors are mechanical matching results, not Rename e
 
 ## Build from a clean checkout
 
-Requires JDK 21. Kotlin 2.2.10, Gradle Wrapper 8.11.1, JADX 1.5.0, Gson 2.10.1 and mapping-io 0.6.1 remain pinned. Module lockfiles record resolved dependencies. Initial dependency downloads require network access.
+Build from the DroidLab repository root with its single Gradle Wrapper and JDK 21. The root pins Kotlin 2.4.21 and Gradle 9.7; JADX 1.5.0, Gson 2.10.1 and mapping-io 0.6.1 remain unchanged. Module lockfiles record resolved dependencies. Initial dependency downloads require network access. All commands below run from the DroidLab root.
 
 Linux/macOS:
 
 ```sh
-git clone https://github.com/quiaingmuarua/DexLineage.git
-cd DexLineage
-./gradlew build installDist
+git clone https://github.com/quiaingmuarua/DroidLab.git
+cd DroidLab
+./gradlew -Pandroid=false :dexlineage:build :dexlineage:installDist
 build/install/dexlineage/bin/dexlineage --version
 build/install/dexlineage/bin/dexlineage --help
 ```
@@ -26,21 +26,21 @@ build/install/dexlineage/bin/dexlineage --help
 Windows PowerShell, from the checkout:
 
 ```powershell
-.\gradlew.bat build installDist
+.\gradlew.bat -Pandroid=false :dexlineage:build :dexlineage:installDist
 $cli = '.\build\install\dexlineage\bin\dexlineage.bat'
 & $cli --version
 & $cli --help
 ```
 
-The launcher retains `build/install/dexlineage` and a 3 GiB maximum heap. Root `test`, `check`, `build`, `installDist` and `realCaseTest` aggregate the relevant module tasks. A focused test can run with `:analysis:test` or `:jadx:test`.
+The launcher lives at root `build/install/dexlineage` and retains a 3 GiB maximum heap. The `:dexlineage:test`, `:dexlineage:check`, `:dexlineage:build`, `:dexlineage:installDist` and `:dexlineage:realCaseTest` tasks aggregate this component's modules. Focused JVM tests use `./gradlew -Pandroid=false :dexlineage:analysis:test` or `:dexlineage:jadx:test`.
 
-Normal `test` and `build` do not require Android SDK or any APKs. Keep repeatable private profiles, rules, runs, reviews and reports under ignored `.local/`; use ignored `.runtime/` for probes. APKs can stay at their existing paths. No installed JADX GUI, exported Gradle project or model API is required.
+Use `-Pandroid=false` with the DexLineage JVM tasks to avoid configuring Android modules; those tasks do not require an Android SDK or any APKs. Keep private profiles, rules, runs, reviews and reports in a private workspace outside DroidLab. The examples use `../private-research/dexlineage/` as an illustrative external location; replace it with your actual directory. APKs can stay at their existing paths. Temporary public probes may use ignored root `.runtime/`. No installed JADX GUI, exported Gradle project or model API is required.
 
 ### Android Studio
 
-Open the repository root, use the committed Gradle Wrapper and JDK 21, then sync. The same root settings import the five JVM modules and the test-only `:fixture-apk` Android application module (`fixtures/android`). Its standard source sets are `src/main`, `src/v1` and `src/v2`; select `v1Release` or `v2Release` in Build Variants. There is no nested Android Gradle project to import separately.
+Open the DroidLab repository root, use its Gradle Wrapper and JDK 21, then sync. The root settings import the five `:dexlineage:*` JVM modules and the test-only `:dexlineage:fixture-apk` Android application module (`dexlineage/fixtures/android`). Its standard source sets are `src/main`, `src/v1` and `src/v2`; select `v1Release` or `v2Release` in Build Variants. There is no nested Android Gradle project to import separately.
 
-IDE imports enable the Android module automatically. For other tooling, use `-PandroidFixtures=true`; `-PandroidFixtures=false` explicitly keeps a JVM-only project. Command-line `fixtureIntegrationTest`, `buildFixtureApks` and `:fixture-apk:...` tasks enable it automatically, so existing integration commands stay unchanged. Configure the Android SDK in root `local.properties` (`sdk.dir=...`) or `ANDROID_HOME`.
+Android modules are enabled by default. Use `-Pandroid=false` for JVM/Node-only work and `-Pandroid=true` to enable Android explicitly. Fixture tasks fail clearly if Android is disabled. Configure the Android SDK in DroidLab root `local.properties` (`sdk.dir=...`) or `ANDROID_HOME`. There is no nested settings file or Wrapper.
 
 ## Public APK integration regression
 
@@ -50,14 +50,16 @@ Install Android SDK command-line tools, configure `ANDROID_HOME`, then install t
 
 ```sh
 export ANDROID_HOME=/path/to/android-sdk
-"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
+"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;36.0.0'
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
-./gradlew fixtureIntegrationTest
+./gradlew :dexlineage:fixtureIntegrationTest
 ```
 
-On PowerShell, set `$env:ANDROID_HOME` to your SDK directory, use `sdkmanager.bat` with the same package names, and run `.\gradlew.bat fixtureIntegrationTest`. Alternatively set `sdk.dir=/path/to/android-sdk` in ignored root `local.properties` (use forward slashes on Windows). Missing SDK components fail the integration task; the suite is never silently skipped.
+On PowerShell, set `$env:ANDROID_HOME` to your SDK directory, use `sdkmanager.bat` with the same package names, and run `.\gradlew.bat :dexlineage:fixtureIntegrationTest`. Alternatively set `sdk.dir=/path/to/android-sdk` in ignored root `local.properties` (use forward slashes on Windows). Missing SDK components fail the integration task; the suite is never silently skipped.
 
-The test-only `:fixture-apk` Android application module lives under `fixtures/android/`: AGP 8.10.1, its embedded R8 8.10.24, compile/target SDK 35, build tools 35.0.0, min SDK 26 and Java source/target 17. It uses the root Gradle Wrapper and JDK 21. No device, emulator, private APK, signing key, model service or repository secret is needed.
+The test-only `:dexlineage:fixture-apk` module lives under `dexlineage/fixtures/android/`: root-pinned AGP 9.4.1 and its embedded R8 9.4.24, compile/target SDK 35, build tools 36.0.0, min SDK 26 and Java source/target 17. The expected R8 identity remains an explicit fixture preflight input in `dexlineage/fixtures/cases.json`. The Android artifact provider exports exactly one APK per Release variant into `dexlineage/fixtures/android/build/fixture-inputs/`, including when IDE ABI properties change AGP's internal output location. It uses the root Gradle Wrapper and JDK 21. No device, emulator, private APK, signing key, model service or repository secret is needed.
+
+The fixture task automatically uses an isolated R8 worker profile that disables bottom-up outlining for this static specimen. This preserves the direct diagnostic-guard shape covered by the existing matcher, with real class/member renaming still enabled. It does not add support for R8 synthetic throw helpers or claim production Release optimization coverage. See [fixture toolchain boundaries](docs/fixture-testing.md).
 
 R8 Mapping is a test-only oracle for independent expected identities. The matcher receives APKs and rule data; it never receives that Mapping or expected candidate identities. Test Reviews contain predefined fixture semantics and real run/evidence references. They test protocol and publication behavior, **not Agent semantic judgment**.
 
@@ -69,13 +71,13 @@ CI runs JVM checks on Ubuntu 24.04 and Windows, and the APK suite on Ubuntu 24.0
 
 An analysis method combines existing matching operations into a finite, recoverable flow. `messages.grpc` owns the observed Messages RPC shapes and topic policy; `messages.proto-relations` follows numbered fields from a verified Proto parent; `profile` runs the existing generic discovery/template flow. JADX is the current fact-reading implementation. No method can bypass matching, Review or publication checks.
 
-Copy [the gRPC workspace configuration](examples/grpc-workspace.json), [seed rules](examples/grpc-anchor-rules.json) and [discovery profile](examples/grpc-discovery-profile.json) under `.local/`, then set the APK path and observed service/RPC inputs. Alternatively use [the profile workspace configuration](examples/profile-workspace.json) with a logger profile. Relative configuration paths are resolved from the configuration file. Optional `baseKnowledge` and `referenceKnowledge` paths are explicit inputs; expected obfuscated targets are never matching inputs.
+Copy [the gRPC workspace configuration](examples/grpc-workspace.json), [seed rules](examples/grpc-anchor-rules.json) and [discovery profile](examples/grpc-discovery-profile.json) under `../private-research/dexlineage/`, then set the APK path and observed service/RPC inputs. Alternatively use [the profile workspace configuration](examples/profile-workspace.json) with a logger profile. Relative configuration paths are resolved from the configuration file. Optional `baseKnowledge` and `referenceKnowledge` paths are explicit inputs; expected obfuscated targets are never matching inputs.
 
 ```powershell
-& $cli analysis run --method messages.grpc --config .local\grpc-workspace.json --work .local\topic-work-001
-& $cli analysis status --work .local\topic-work-001
+& $cli analysis run --method messages.grpc --config ..\private-research\dexlineage\grpc-workspace.json --work ..\private-research\dexlineage\topic-work-001
+& $cli analysis status --work ..\private-research\dexlineage\topic-work-001
 # After interruption, resume the same frozen inputs and implementation.
-& $cli analysis resume --work .local\topic-work-001
+& $cli analysis resume --work ..\private-research\dexlineage\topic-work-001
 ```
 
 The gRPC method declares three seed rounds; Proto relations declares two; `profile` has none. The shared flow then discovers, prepares rules and writes a review packet. It stops at `WAITING_REVIEW` and returns `runPath` and `packetPath`. Read `summary.md` and `review-packet.json`, copy `review-template.json` to a separate review file, and fill the semantic judgment, rationale and limitations after reading the linked evidence. The template pre-fills proof/evidence identities but contains no automatic HIGH/ACCEPT decision.
@@ -83,8 +85,8 @@ The gRPC method declares three seed rounds; Proto relations declares two; `profi
 See [one-hop Proto relation analysis](docs/messages-proto-relations.md) for fixed field-number targets, optional workspace corpus input, explicit zero-match tasks, and migration of the resulting independent knowledge package.
 
 ```powershell
-& $cli analysis submit --run '<runPath>' --review .local\review.json
-& $cli analysis resume --work .local\topic-work-001
+& $cli analysis submit --run '<runPath>' --review ..\private-research\dexlineage\review.json
+& $cli analysis resume --work ..\private-research\dexlineage\topic-work-001
 ```
 
 Once the selected review scope has decisions, explicit `resume` freezes the Review revisions and publishes to a new directory. Invalid, rejected and deferred tasks remain visible; unreviewed targets outside the selected scope do not block the reviewed topic. `COMPLETE` resume returns the same publication. Later Review revisions can still be published with the existing explicit `analysis publish` command.
@@ -95,17 +97,17 @@ The individual commands below remain available. To generate the same work packag
 
 ## Analyze an APK
 
-Copy [the logger profile](examples/logger-profile.json) into `.local/` and set its business tag. It discovers field-initializer clues and can generate per-target rule drafts. No owner list or expected target belongs in the profile.
+Copy [the logger profile](examples/logger-profile.json) into `../private-research/dexlineage/` and set its business tag. It discovers field-initializer clues and can generate per-target rule drafts. No owner list or expected target belongs in the profile.
 
 ```powershell
-& $cli analysis discover --apk 'D:\apks\current.apk' --profile .local\logger-profile.json --out .local\discovery-001
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules .local\discovery-001\rules.json --run .local\analysis-001
-& $cli analysis tasks --run .local\analysis-001 --state UNREVIEWED --offset 0 --limit 20
-& $cli analysis inspect --run .local\analysis-001 --task 'task-key-1,task-key-2'
+& $cli analysis discover --apk 'D:\apks\current.apk' --profile ..\private-research\dexlineage\logger-profile.json --out ..\private-research\dexlineage\discovery-001
+& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\discovery-001\rules.json --run ..\private-research\dexlineage\analysis-001
+& $cli analysis tasks --run ..\private-research\dexlineage\analysis-001 --state UNREVIEWED --offset 0 --limit 20
+& $cli analysis inspect --run ..\private-research\dexlineage\analysis-001 --task 'task-key-1,task-key-2'
 # The Agent reads the evidence and writes the appropriate review batch.
-& $cli analysis submit --run .local\analysis-001 --review .local\analysis-review.json
-& $cli analysis publish --run .local\analysis-001 --out .local\knowledge-v1
-& $cli knowledge verify --knowledge .local\knowledge-v1\knowledge.json --apk 'D:\apks\current.apk' --work .runtime\verify-v1
+& $cli analysis submit --run ..\private-research\dexlineage\analysis-001 --review ..\private-research\dexlineage\analysis-review.json
+& $cli analysis publish --run ..\private-research\dexlineage\analysis-001 --out ..\private-research\dexlineage\knowledge-v1
+& $cli knowledge verify --knowledge ..\private-research\dexlineage\knowledge-v1\knowledge.json --apk 'D:\apks\current.apk' --work .runtime\verify-v1
 ```
 
 Discovery can return many owners: this is normal scope exploration. Its clues and rule drafts cannot publish names. `prepare` executes each target's rules over the entire APK, including owners outside the discovery scope, and freezes a Resolution. A discovery-linked unique result must also agree with that lead's original owner.
@@ -121,9 +123,9 @@ The gRPC flow starts with a verified framework class and method, then follows ra
 After the `grpc.full-name` anchor is ready, use [the discovery profile](examples/grpc-discovery-profile.json):
 
 ```powershell
-& $cli analysis discover --apk 'D:\apks\current.apk' --profile .local\grpc-profile.json --base-knowledge .local\anchors-r3\knowledge.json --out .local\grpc-discovery
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules .local\grpc-discovery\rules.json --base-knowledge .local\anchors-r3\knowledge.json --reference-knowledge .local\existing\knowledge.json --run .local\grpc-analysis
-& $cli analysis tasks --run .local\grpc-analysis --service example.Service --state ALL --limit 100
+& $cli analysis discover --apk 'D:\apks\current.apk' --profile ..\private-research\dexlineage\grpc-profile.json --base-knowledge ..\private-research\dexlineage\anchors-r3\knowledge.json --out ..\private-research\dexlineage\grpc-discovery
+& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\grpc-discovery\rules.json --base-knowledge ..\private-research\dexlineage\anchors-r3\knowledge.json --reference-knowledge ..\private-research\dexlineage\existing\knowledge.json --run ..\private-research\dexlineage\grpc-analysis
+& $cli analysis tasks --run ..\private-research\dexlineage\grpc-analysis --service example.Service --state ALL --limit 100
 ```
 
 Discovery writes `discovery.json`, `rpc-catalog.json` and class rule drafts. It records all direct calls to the framework anchor, including dynamic/configuration uses and unsupported constructions. The reader binds the name, builder and both marshaller roles to one Descriptor construction. Request/response types come from their respective default instances, with no assumption about field order, constructor parameter order, outer method return type or unary-only RPCs.
@@ -137,8 +139,8 @@ Discovery writes `discovery.json`, `rpc-catalog.json` and class rule drafts. It 
 Import a JADX `projectVersion=1` annotation project into a new corpus directory:
 
 ```powershell
-& $cli analysis import-jadx --apk 'D:\apks\current.apk' --project 'D:\apks\current.apk.jadx' --out .local\manual-corpus
-& $cli analysis targets --corpus .local\manual-corpus\corpus.json --limit 20
+& $cli analysis import-jadx --apk 'D:\apks\current.apk' --project 'D:\apks\current.apk.jadx' --out ..\private-research\dexlineage\manual-corpus
+& $cli analysis targets --corpus ..\private-research\dexlineage\manual-corpus\corpus.json --limit 20
 ```
 
 The corpus preserves class, field, method and local annotations. Class annotations become stable targets; members and local positions remain research context. Import validates original class/member references. A class target's source identity is checked after matching; it is never passed to the matcher as an expected-owner filter. Importing an annotation does not approve a name for publication. The 544 annotations / 238 classes in the private Messages audit describe that local case, not a public default or a coverage target.
@@ -148,7 +150,7 @@ An Analysis rule item can refer to a corpus target using `corpusTargetId`. Pass 
 Investigate selected manual targets before writing rules:
 
 ```powershell
-& $cli analysis research --corpus .local\manual-corpus\corpus.json --target 'manual-target-id-1,manual-target-id-2' --out .local\research-001
+& $cli analysis research --corpus ..\private-research\dexlineage\manual-corpus\corpus.json --target 'manual-target-id-1,manual-target-id-2' --out ..\private-research\dexlineage\research-001
 ```
 
 Research reads the corpus's frozen source APK and preserves owner annotations alongside raw class/member identities, strings, direct calls, field accesses and Java/Smali evidence. It batches selected targets, does not recursively explore relationships, and writes `research.json` without creating a matching run. Research can help author a rule; it is not a Resolution, and its evidence cannot be submitted as another run's Review. A partial Java rendering remains explicit while raw DEX reading failures abort the operation.
@@ -156,16 +158,16 @@ Research reads the corpus's frozen source APK and preserves owner annotations al
 Copy [the multi-round example](examples/multiround-rules.json) and replace its public marker/component strings with observed inputs. It defines a logger class anchor, a current-version factory METHOD anchor and a class target that uses that factory:
 
 ```powershell
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules .local\round-rules.json --corpus .local\manual-corpus\corpus.json --run .local\round-1
-& $cli analysis tasks --run .local\round-1 --state ALL
-& $cli analysis publish --run .local\round-1 --out .local\knowledge-round-1
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules .local\round-rules.json --corpus .local\manual-corpus\corpus.json --base-knowledge .local\knowledge-round-1\knowledge.json --run .local\round-2
-& $cli analysis publish --run .local\round-2 --out .local\knowledge-round-2
+& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\round-rules.json --corpus ..\private-research\dexlineage\manual-corpus\corpus.json --run ..\private-research\dexlineage\round-1
+& $cli analysis tasks --run ..\private-research\dexlineage\round-1 --state ALL
+& $cli analysis publish --run ..\private-research\dexlineage\round-1 --out ..\private-research\dexlineage\knowledge-round-1
+& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\round-rules.json --corpus ..\private-research\dexlineage\manual-corpus\corpus.json --base-knowledge ..\private-research\dexlineage\knowledge-round-1\knowledge.json --run ..\private-research\dexlineage\round-2
+& $cli analysis publish --run ..\private-research\dexlineage\round-2 --out ..\private-research\dexlineage\knowledge-round-2
 ```
 
 Continue with a new run and the latest base until the required class tasks are ready for `inspect / submit / publish`. This example needs another round before the class can use its newly published factory. `prepare` never consumes anchors created within that same execution. Missing resolved prerequisites are `WAITING_DEPENDENCY`, with no fabricated Resolution. `inspect --task 'anchor:logger-factory'` reads an anchor's code; ordinary task IDs read class candidates and their dependency evidence.
 
-The compile-time registry provides Messages-oriented logger, Handler-name and RPC/Proto strategies. They take configuration and structured APK facts, not hardcoded obfuscated answers. [The RPC example](examples/rpc-rules.json) demonstrates one descriptor METHOD anchor feeding request and response class targets. Real application tags, service lists and manual names belong in `.local`; the strategy code and self-authored fixtures are public.
+The compile-time registry provides Messages-oriented logger, Handler-name and RPC/Proto strategies. They take configuration and structured APK facts, not hardcoded obfuscated answers. [The RPC example](examples/rpc-rules.json) demonstrates one descriptor METHOD anchor feeding request and response class targets. Real application tags, service lists and manual names belong in the external private workspace; the strategy code and self-authored fixtures are public.
 
 [RPC related-type rules](examples/rpc-related-rules.json) use the same verified METHOD anchor to locate the constructed descriptor, its builder, and the common marshaller declaration interface. Service, RPC and label settings come from the producer rule. The strategy reads the actual construction, including when the outer RPC method returns `Object`; it does not name the outer method's return type or the concrete marshaller implementation by assumption. Any unresolved competing construction keeps related-type results UNKNOWN even when the enclosing method is unique. This takes two rounds: publish the RPC method anchor, then match and review class targets.
 
@@ -174,9 +176,9 @@ The compile-time registry provides Messages-oriented logger, Handler-name and RP
 Pass a knowledge package from the same APK with `--base-knowledge`:
 
 ```powershell
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules .local\additional-rules.json --base-knowledge .local\knowledge-v1\knowledge.json --run .local\analysis-002
+& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\additional-rules.json --base-knowledge ..\private-research\dexlineage\knowledge-v1\knowledge.json --run ..\private-research\dexlineage\analysis-002
 # Inspect and review the new or changed tasks, then publish a complete revision.
-& $cli analysis publish --run .local\analysis-002 --out .local\knowledge-v1-revision-2
+& $cli analysis publish --run ..\private-research\dexlineage\analysis-002 --out ..\private-research\dexlineage\knowledge-v1-revision-2
 ```
 
 The base knowledge ID is frozen. Existing current-version entities retain their `semanticId`; names are not identity keys. Successful updates and new confirmations are combined with unchanged base entries. A failed rule attempt, rejected update or conflicting proposal does not erase the prior valid binding, name or rule. This version does not move an existing semantic ID to another entity in the same APK.
@@ -190,12 +192,12 @@ An explicitly selected pending item whose last binding belongs to the current AP
 Pass the published knowledge file and accompanying evidence directly to Migration:
 
 ```powershell
-& $cli migration prepare --knowledge .local\knowledge-v1\knowledge.json --source-apk 'D:\apks\old.apk' --target-apk 'D:\apks\new.apk' --run .local\migration-001
-& $cli migration tasks --run .local\migration-001 --state UNREVIEWED --offset 0 --limit 20
-& $cli migration inspect --run .local\migration-001 --task 'semantic-id-1,semantic-id-2'
-& $cli migration submit --run .local\migration-001 --review .local\migration-review.json
-& $cli migration publish --run .local\migration-001 --out .local\knowledge-v2
-& $cli knowledge verify --knowledge .local\knowledge-v2\knowledge.json --apk 'D:\apks\new.apk' --work .runtime\verify-v2
+& $cli migration prepare --knowledge ..\private-research\dexlineage\knowledge-v1\knowledge.json --source-apk 'D:\apks\old.apk' --target-apk 'D:\apks\new.apk' --run ..\private-research\dexlineage\migration-001
+& $cli migration tasks --run ..\private-research\dexlineage\migration-001 --state UNREVIEWED --offset 0 --limit 20
+& $cli migration inspect --run ..\private-research\dexlineage\migration-001 --task 'semantic-id-1,semantic-id-2'
+& $cli migration submit --run ..\private-research\dexlineage\migration-001 --review ..\private-research\dexlineage\migration-review.json
+& $cli migration publish --run ..\private-research\dexlineage\migration-001 --out ..\private-research\dexlineage\knowledge-v2
+& $cli knowledge verify --knowledge ..\private-research\dexlineage\knowledge-v2\knowledge.json --apk 'D:\apks\new.apk' --work .runtime\verify-v2
 ```
 
 Migration only creates tasks for confirmed semantic targets in the source knowledge. It preserves their names and keeps unresolved knowledge with its last confirmed source. The default confidence threshold is HIGH; `prepare --min-confidence MEDIUM` freezes another threshold without relaxing uniqueness or identity checks.
@@ -203,7 +205,7 @@ Migration only creates tasks for confirmed semantic targets in the source knowle
 Source anchors supply rule definitions, not target-version bindings. Migration resolves them again on the target APK. After publishing one round, keep the original `--knowledge` and source/target APKs fixed and pass the prior target package through `--target-base`:
 
 ```powershell
-& $cli migration prepare --knowledge .local\knowledge-v1\knowledge.json --source-apk 'D:\apks\old.apk' --target-apk 'D:\apks\new.apk' --target-base .local\knowledge-v2-round-1\knowledge.json --run .local\migration-002
+& $cli migration prepare --knowledge ..\private-research\dexlineage\knowledge-v1\knowledge.json --source-apk 'D:\apks\old.apk' --target-apk 'D:\apks\new.apk' --target-base ..\private-research\dexlineage\knowledge-v2-round-1\knowledge.json --run ..\private-research\dexlineage\migration-002
 ```
 
 The target base must belong to that same source knowledge and target APK. It preserves earlier target confirmations while enabling later dependency rounds; it does not replace the frozen source target set.
@@ -232,8 +234,8 @@ Every publication uses a new directory containing:
 Keep the package together. Matching proofs include their frozen dependencies; all referenced code is copied into the package, including historical proof evidence. Reproduce a same-run publication after later reviews:
 
 ```powershell
-& $cli analysis publish --run .local\analysis-001 --at .local\knowledge-v1\report.json --out .local\knowledge-v1-replay
-& $cli migration publish --run .local\migration-001 --at .local\knowledge-v2\report.json --out .local\knowledge-v2-replay
+& $cli analysis publish --run ..\private-research\dexlineage\analysis-001 --at ..\private-research\dexlineage\knowledge-v1\report.json --out ..\private-research\dexlineage\knowledge-v1-replay
+& $cli migration publish --run ..\private-research\dexlineage\migration-001 --at ..\private-research\dexlineage\knowledge-v2\report.json --out ..\private-research\dexlineage\knowledge-v2-replay
 ```
 
 This replays saved decisions. Re-executing matching from APKs and fixed rules is a separate check; publication replay does not establish that matching has been rerun.
@@ -241,9 +243,9 @@ This replays saved decisions. Re-executing matching from APKs and fixed rules is
 ## Upgrade historical knowledge explicitly
 
 ```powershell
-& $cli knowledge import-v03 --knowledge .local\v03-package\knowledge.json --apk 'D:\apks\current.apk' --out .local\v04-imported
-& $cli knowledge import-v02 --knowledge .local\v02-package\knowledge.json --apk 'D:\apks\current.apk' --out .local\v02-upgraded
-& $cli knowledge import-s1 --output .local\s1-output --run .local\s1-run --out .local\s1-imported
+& $cli knowledge import-v03 --knowledge ..\private-research\dexlineage\v03-package\knowledge.json --apk 'D:\apks\current.apk' --out ..\private-research\dexlineage\v04-imported
+& $cli knowledge import-v02 --knowledge ..\private-research\dexlineage\v02-package\knowledge.json --apk 'D:\apks\current.apk' --out ..\private-research\dexlineage\v02-upgraded
+& $cli knowledge import-s1 --output ..\private-research\dexlineage\s1-output --run ..\private-research\dexlineage\s1-run --out ..\private-research\dexlineage\s1-imported
 ```
 
 The importers validate the old knowledge package, report, Mapping and code evidence, then rerun rules against the supplied APK. Only a unique result that remains the original binding can retain the validated historical semantic review. Ambiguous, unknown, missing or differently bound results become pending with their historical source preserved. Broken packages or missing required proof are input errors. S1 conversion retains its original consistency checks and applies the same uniqueness gate.
@@ -268,21 +270,21 @@ caseManifest=manifest.json
 acceptanceRoot=acceptance
 ```
 
-The schema-4 manifest records `corpus`, ordered `analysisRounds` and `migrationRounds` (each with `run` and `output`), optional `shapeRounds`, and `upgradedV03` package paths. Paths resolve relative to the manifest. Optional `expectedAnnotationCounts`, `expectedClassTargets`, `requiredStrategyIds` and `requiredPublishedRules` make the local acceptance requirements explicit. The runner freshly checks producer anchors before using them as dependencies, reexecutes matching, replays each saved publication, then independently reads back final class mappings. Keep the manifest and all private results under `.local`.
+The schema-4 manifest records `corpus`, ordered `analysisRounds` and `migrationRounds` (each with `run` and `output`), optional `shapeRounds`, and `upgradedV03` package paths. Paths resolve relative to the manifest. Optional `expectedAnnotationCounts`, `expectedClassTargets`, `requiredStrategyIds` and `requiredPublishedRules` make the local acceptance requirements explicit. The runner freshly checks producer anchors before using them as dependencies, reexecutes matching, replays each saved publication, then independently reads back final class mappings. Keep the manifest and all private results in the external private workspace.
 
 On Windows, very large selections can exceed the `.bat` command-line limit. Page the task list into smaller batches, or invoke the same installed CLI without the batch wrapper:
 
 ```powershell
-java -Xmx3g '-Dorg.slf4j.simpleLogger.defaultLogLevel=warn' -cp 'build/install/dexlineage/lib/*' dev.dexlineage.cli.MainKt migration inspect --run .local/my-case/target-run --task $taskIds
+java -Xmx3g '-Dorg.slf4j.simpleLogger.defaultLogLevel=warn' -cp 'build/install/dexlineage/lib/*' dev.dexlineage.cli.MainKt migration inspect --run ../private-research/dexlineage/my-case/target-run --task $taskIds
 ```
 
 Use a new schema-4 case configuration; old v0.3 runs must be upgraded explicitly before reuse. The test's required property keys are documented by its [source](cli/src/test/kotlin/dev/dexlineage/cli/RealCaseTest.kt), and paths resolve relative to the properties file. A case configuration points to actual prepared, reviewed and published artifacts, not a candidate-answer list.
 
 ```powershell
-.\gradlew.bat realCaseTest "-PcaseProperties=.local/my-case/acceptance.properties"
+.\gradlew.bat -Pandroid=false :dexlineage:realCaseTest "-PcaseProperties=../private-research/dexlineage/my-case/acceptance.properties"
 ```
 
-Keep case configuration and acceptance records in `.local/`. Evidence-volume metrics describe generated/cached files, not automatic measurement of Agent reading. Partial code and the review's unverified scope remain visible.
+Keep case configuration and acceptance records in `../private-research/dexlineage/`. Evidence-volume metrics describe generated/cached files, not automatic measurement of Agent reading. Partial code and the review's unverified scope remain visible.
 
 Commands emit JSON on stdout and diagnostics on stderr. Exit codes are `0` for completion, including invalid/pending items; `2` for invalid inputs or Review submissions; and `1` for execution failure.
 

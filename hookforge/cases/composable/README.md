@@ -2,24 +2,22 @@
 
 These thin drivers use the new parser, App startup and session implementation.
 They do not install/connect/inject through a second Host. All commands run
-from the repository root with native Windows tools in Git Bash (or CI's
+from the DroidLab root with native Windows tools in Git Bash (or CI's
 original platform). Prepare the API33 x86_64 device and pinned 17.9.1 server.
 
 ```bash
-npm run build:hosts
-npm run build:prod
-npm run artifact:write
-npm run case:composable -- \
-  --apk .runtime/fixtures/detect-env-api33-x86_64.apk \
+./gradlew -Pandroid=false :hookforge:verifyProductionArtifact
+npm --prefix hookforge run case:composable -- \
+  --apk /absolute/path/detect-env-debug.apk \
   --serial emulator-5554 \
-  --agent dist/android-api.js \
-  --production-manifest .runtime/frida-api33/production-manifest.json \
+  --agent hookforge/dist/android-api.js \
+  --production-manifest .runtime/hookforge/production-manifest.json \
   --output .runtime/frida/runs/duck-production
-node cases/composable/rootbeer.mjs \
+node hookforge/cases/composable/rootbeer.mjs \
   --apk 'D:/work_app/telegram/RootBeer Sample_0.9_APKPure.apk' \
   --serial emulator-5554 \
-  --agent dist/android-api.js \
-  --production-manifest .runtime/frida-api33/production-manifest.json \
+  --agent hookforge/dist/android-api.js \
+  --production-manifest .runtime/hookforge/production-manifest.json \
   --output .runtime/frida/runs/rootbeer-production
 ```
 
@@ -54,14 +52,15 @@ whole-device safety claim. Evidence stays in `.runtime`; this adds no CI lane.
 
 ## Linked CLI real APK proof
 
-After `npm ci`, `npm run build:prod` and `npm link` in HookForge, run this from
-your separate project directory. Use native Windows Git Bash, not WSL:
+From the DroidLab root, run `./gradlew -Pandroid=false :hookforge:assemble`
+and the optional `npm --prefix hookforge link`. Then run this from your separate
+project directory, substituting the absolute DroidLab path. Use native Windows Git Bash, not WSL:
 
 ```bash
-node /d/code_project/geekrun/HookForge/cases/composable/linked.mjs \
+node /absolute/path/DroidLab/hookforge/cases/composable/linked.mjs \
   --serial emulator-5554 \
-  --rootbeer-apk /d/code_project/geekrun/HookForge/.runtime/fixtures/rootbeer-sample-0.9.apk \
-  --duck-apk /d/code_project/geekrun/HookForge/.runtime/fixtures/detect-env-api33-x86_64.apk
+  --rootbeer-apk /absolute/path/DroidLab/.runtime/fixtures/rootbeer-sample-0.9.apk \
+  --duck-apk /absolute/path/DroidLab/.runtime/fixtures/detect-env-api33-x86_64.apk
 ```
 
 The API33 x86_64 emulator and locked Frida 17.9.1 server must already be ready.
@@ -92,7 +91,7 @@ separately reports CLI readiness, installed APIs, actual hashes and cleanup;
 HTTP responses and JSON/Full Reports remain in the evidence directory. The same
 public bundle is used without rebuilding or changing its modification time.
 
-Local verification on 2026-10-29 (API33 x86_64, Frida 17.9.1) passed through
+Historical upstream verification on 2026-10-29 (API33 x86_64, Frida 17.9.1) passed through
 the linked executable from AgentForge:
 
 | Original result | Baseline / observe | Replacement | After unload / cold |

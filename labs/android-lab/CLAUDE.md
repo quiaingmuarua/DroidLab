@@ -1,6 +1,6 @@
 # Android Lab Agent README
 
-`crackme:android-lab` is the target application for Android framework,
+`labs:android-lab` is the target application for Android framework,
 networking, crypto, IPC, and third-party integration demos. It owns its app
 behavior, local scenario events, verdict shaping, and generated scenario
 truth.
@@ -48,10 +48,12 @@ generated `verify_event` must appear in the same capability server's
 
 ## Verification
 
+Run from the DroidLab root:
+
 ```powershell
-.\gradlew.bat :crackme:android-lab:testDebugUnitTest
-.\gradlew.bat :crackme:android-lab:assembleDebug
-python -m agentforge_tools release resolve --component worker-sdk
+python -m droidlab_tools release resolve --component worker-sdk --lock XA_MASS_RELEASE.lock.json
+.\gradlew.bat :labs:android-lab:testDebugUnitTest
+.\gradlew.bat :labs:android-lab:assembleDebug
 ```
 
 App unit tests cover the event and catalog contracts. Actual HTTP collection

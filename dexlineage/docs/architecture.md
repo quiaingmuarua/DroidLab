@@ -247,7 +247,7 @@ There is no dynamic Handler runtime, generic Agent workflow or automatic graph s
 
 ## Public integration boundary
 
-`fixture-apk` is an optional Android application module at `fixtures/android`, owned by the root Gradle build. It generates test inputs and is not a sixth production module. Its two source flavors pass through pinned R8 with name obfuscation enabled and shrinking/optimization disabled. Android Studio imports the module automatically. Ordinary command-line JVM builds exclude it and do not require an SDK; fixture tasks or `-PandroidFixtures=true` include it.
+`:dexlineage:fixture-apk` is an Android application module at `dexlineage/fixtures/android`, owned by the DroidLab root Gradle build. It generates test inputs and is not a sixth production module. Its two source flavors pass through pinned R8 with name obfuscation enabled and shrinking/optimization disabled. Android modules are enabled by default. Use the root Wrapper with `-Pandroid=false` and `:dexlineage:*` JVM tasks to omit Android and avoid the SDK requirement. Fixture tasks require Android and fail clearly when it is disabled.
 
 The explicit `fixtureIntegrationTest` task builds and validates the fixtures before driving installed CLI subprocesses. The fixture oracle and R8 Mapping belong exclusively to the test side. Production matching consumes APKs and ordinary rule inputs; Reviews use predefined fixture semantics only after candidates agree with independently mapped source identities. Public fixture regression validates the mechanism, while private real-case acceptance retains actual Agent review. See [fixture testing](fixture-testing.md) for the flow, maintenance and diagnostic artifacts.
 

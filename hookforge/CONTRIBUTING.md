@@ -1,4 +1,9 @@
-# Contributing
+# Contributing to DroidLab's HookForge module
+
+Use the DroidLab root Gradle Wrapper and commit to DroidLab. HookForge retains
+its TypeScript/npm implementation under `hookforge/`; it has no separate Git
+or Gradle project entrypoint. From the root, run
+`./gradlew -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact`.
 
 Start with a real APK and an observable acceptance goal. Follow the
 [work loop and Git rules](AGENTS.md): evaluate existing tools first, implement

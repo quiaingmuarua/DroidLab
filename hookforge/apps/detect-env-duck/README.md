@@ -1,11 +1,11 @@
 # detect-env Duck App pack
 
-From the repository root, with the Duck-enabled detect-env APK installed and
+From the DroidLab root, with the Duck-enabled detect-env APK installed and
 the pinned Frida server running:
 
 ```bash
-npm run cli -- plan --app apps/detect-env-duck/app.json --trace file-io,system-properties
-npm run cli -- run --serial emulator-5554 --app apps/detect-env-duck/app.json --trace file-io,system-properties
+npm --prefix hookforge run cli -- plan --app hookforge/apps/detect-env-duck/app.json --trace file-io,system-properties
+npm --prefix hookforge run cli -- run --serial emulator-5554 --app hookforge/apps/detect-env-duck/app.json --trace file-io,system-properties
 ```
 
 The Host cold-starts the original `android.app.NativeActivity`, verifies the exact
@@ -15,7 +15,8 @@ a scan or enable replacement. Use the existing UI or HTTP scan event normally.
 The owned HTTP forward is printed in `run.log`; it lasts for this run only.
 
 To deliver normal property values, add `--replace system-properties --profile
-cases/duck-system-properties/normal.json`. Risk values use `risk.json`.
+hookforge/cases/duck-system-properties/normal.json`. Risk values use the sibling
+`risk.json`.
 Only these selected property inputs are claimed; other Duck findings retain
 their original meaning.
 

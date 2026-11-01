@@ -1,8 +1,7 @@
 # Duck SDK integration baseline
 
 detect-env hosts the original Duck Detector AAR behind its existing loopback
-NanoHTTP capability surface and a small third-party checks page. This proves
-SDK integration and collects original evidence; it does not prove hook evasion
+NanoHTTP capability surface and a small third-party checks page. It collects original SDK evidence; it does not prove hook evasion
 or reproduce the installed Duck APK's complete application environment.
 
 ## Fixed input and build
@@ -15,19 +14,19 @@ the AAR bytes. A corrupt cache fails without replacing it. The license and
 source attribution are included in the APK's `assets/licenses`.
 
 ```powershell
-python -m agentforge_tools release resolve --component worker-sdk
-python -m agentforge_tools duck-sdk resolve
-.\gradlew.bat :crackme:detect-env:testDebugUnitTest :crackme:detect-env:assembleDebug
+python -m droidlab_tools release resolve --component worker-sdk --lock XA_MASS_RELEASE.lock.json
+python -m droidlab_tools duck-sdk resolve
+.\gradlew.bat :labs:detect-env:testDebugUnitTest :labs:detect-env:assembleDebug
 ```
 
 Use JDK 21, AGP 9.4.1, Gradle 9.8.1, build tools 37.0.0 and SDK Manager package
 `platforms;android-37.0`. The API 33 runtime remains supported. The standalone
-APK is under `crackme/detect-env/build/outputs/apk/debug/`.
+APK is under `labs/detect-env/build/outputs/apk/debug/`.
 
 ## Start the actual SDK host
 
 ```powershell
-adb -s emulator-5554 install -r crackme/detect-env/build/outputs/apk/debug/detect-env-debug.apk
+adb -s emulator-5554 install -r labs/detect-env/build/outputs/apk/debug/detect-env-debug.apk
 adb -s emulator-5554 shell am force-stop com.detect.app.sample
 adb -s emulator-5554 shell am start -n com.detect.app.sample/android.app.NativeActivity
 adb -s emulator-5554 forward tcp:18184 tcp:5566
@@ -149,7 +148,8 @@ distinct scan IDs, UI receipt, Logcat, screenshot, APK/AAR hashes and another
 scan after a cold NativeActivity launch under
 `.runtime/duck-detector/runs/<run-id>`. API33/x86_64 gaps remain explicit.
 
-The 2026-10-20 API33/x86_64 baseline returned all 18 registry results through
+The imported source records a 2026-10-20 API33/x86_64 baseline; this migration
+has not reproduced that device run. That historical baseline returned all 18 registry results through
 HTTP, the UI and a fresh process after a cold launch. Two selected
 `system_properties` calls had distinct scan IDs in the same process; invalid
 selections and an overlapping request failed. No `INFO/ERROR` result occurred.
@@ -162,8 +162,8 @@ verdict for the emulator.
 
 The new event is HTTP-only: six standalone or nine configured HTTP events.
 Worker Delivery and the Group/scenario catalog still expose five business
-definitions. Existing Worker and Frida proofs retain their own scopes.
-The separate [Frida system-properties experiment](../../frida/cases/duck-system-properties/README.md)
+definitions. Consumer Worker acceptance and HookForge device checks have separate scopes.
+The separate [Frida system-properties experiment](../../hookforge/cases/duck-system-properties/README.md)
 now exercises four property inputs through the original scan event, retaining
 this JSON/text format. Its configuration, expectations and intervention verdict
 belong to the Host; this SDK baseline integration owns no hook or bypass result.

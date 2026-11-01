@@ -12,7 +12,7 @@ entry point. This reconciles an Nterp entry published between the original metho
 snapshot and instrumentation setup, the window observed in API 33 ARM64 spawn
 tests. It adds no delay, retry, detector-specific rule or deoptimization.
 
-`npm ci` applies the patch through `postinstall`. `npm run check:bridge-patch`
+`npm --prefix hookforge ci` applies the patch through `postinstall`. `npm --prefix hookforge run check:bridge-patch`
 verifies the installed bytes without changing them, and `build:prod` runs that
 check before building. The installer accepts only the exact official source or
 the exact reviewed patched bytes. A different version, lock identity or file

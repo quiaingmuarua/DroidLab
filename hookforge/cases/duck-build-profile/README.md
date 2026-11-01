@@ -8,25 +8,24 @@ The
 [Detection Intervention Contract](../../AGENTS.md#detection-intervention-contract)
 applies; no SDK detection method or result is replaced.
 
-From the repository root in Git Bash, with native Windows Node/ADB, the
+From the DroidLab root in Git Bash, with native Windows Node/ADB, the
 Duck-enabled APK and the locked API33 x86_64 / Frida 17.9.1 server prepared:
 
 ```bash
-npm run build:hosts
-npm run build:prod
-npm run artifact:write
-npm run case:duck-build-profile -- \
-  --apk .runtime/fixtures/detect-env-api33-x86_64.apk \
+./gradlew -Pandroid=false :hookforge:verifyProductionArtifact
+npm --prefix hookforge run case:duck-build-profile -- \
+  --apk /absolute/path/detect-env-debug.apk \
   --serial emulator-5554 \
-  --agent dist/android-api.js \
-  --production-manifest .runtime/frida-api33/production-manifest.json
+  --agent hookforge/dist/android-api.js \
+  --production-manifest .runtime/hookforge/production-manifest.json
 ```
 
 Production arguments are paired and verified before device work. Omitting them
 builds locally. `--output` must name a new directory; the default is
 `.runtime/cases/duck-build-profile/<run-id>`. Install uses `-r` and
 verifies the actual bytes, without uninstalling or clearing data. No WSL is
-used.
+used. Build the normal, non-testOnly APK from `labs/detect-env`; the fixed
+testOnly API33 fixture is not an input for this installer.
 
 The thin driver uses the composable CLI parser, original Duck App startup and
 shared session. It calls only the existing local HTTP scan event with both
@@ -53,8 +52,8 @@ differences, remain in the full original reports.
 After a case, reuse its generated profile for ordinary foreground operation:
 
 ```bash
-npm run cli -- run \
-  --serial emulator-5554 --app apps/detect-env-duck/app.json \
+npm --prefix hookforge run cli -- run \
+  --serial emulator-5554 --app hookforge/apps/detect-env-duck/app.json \
   --replace build-fields,system-properties --trace system-properties \
   --profile <run-directory>/profiles/combined.json
 ```

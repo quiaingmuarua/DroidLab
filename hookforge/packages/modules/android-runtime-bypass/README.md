@@ -14,19 +14,19 @@
   `cfg.flags["android.api"]` 可以选择观察模式或自己的规则。
 - `api-agent.ts`：独立的 Frida RPC 入口，与模块入口使用同一个实现。
 
-在仓库根目录构建独立脚本：
+在 DroidLab 根目录构建独立脚本：
 
 ```powershell
-npm run build:api
+npm --prefix hookforge run build:api
 ```
 
-产物为 `dist/android-api.js`。注入任意 Android Java 应用进程后使用标准 Frida RPC：
+产物为 `hookforge/dist/android-api.js`。注入任意 Android Java 应用进程后使用标准 Frida RPC：
 
 - `configure(policy)`：首次安装，之后完整替换当前配置；等待 Application ClassLoader 就绪。
 - `drain()`：取得并清空这段时间的 API 观测，包含 `records` 和 `dropped`。
 - `dispose()`：恢复字段、Java 方法和 native interceptor，然后再卸载脚本。
 
-日常组合使用 `npm run cli -- list|plan|run`，见
+日常组合使用 `npm --prefix hookforge run cli -- list|plan|run`，见
 [运行说明](../../../README.md#compose-existing-capabilities)。新入口在首次激活前确定安装 API 组，
 仅跟踪选择的 trace 范围；匹配规则、实际修改和错误仍保留并分别计数。
 `status` 回执包含计划组、实际安装及统计；`dropped` 表示证据丢失，不能当作完整观测。
@@ -37,11 +37,11 @@ API 原调用的正常异常保留为观测，`runtimeError` 才表示观察器�
 在同一个 Script 内共享桥。当前 API 33 x86_64 上曾观察到两份独立 bridge 卸载后
 应用延迟崩溃，因此案例把只读适配器附到公共 bundle 后；卸载后再用系统输入复查。
 
-通过现有 CLI 观察目标，在仓库根目录执行：
+通过现有 CLI 观察目标，在 DroidLab 根目录执行：
 
 ```powershell
-npm run build:prod
-npm run observe:android -- -s <package> --duration-ms 45000 --dump-events ../.runtime/frida/api-observe.jsonl
+npm --prefix hookforge run build:prod
+npm --prefix hookforge run observe:android -- -s <package> --duration-ms 45000 --dump-events ../.runtime/frida/api-observe.jsonl
 ```
 
 期间在应用中正常触发相关功能。CLI 通过 loader 的 shutdown 恢复有 deactivate 的模块，

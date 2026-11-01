@@ -1,5 +1,10 @@
 # HookForge
 
+HookForge is DroidLab's `hookforge/` module. Use the root Gradle Wrapper for
+builds and checks; TypeScript, npm lockfiles and runtime files remain owned by
+this module. There is no nested Git repository or independent tool checkout.
+Unless an example explicitly says otherwise, run commands from the DroidLab root.
+
 Solve real Android dynamic-analysis tasks with suitable existing tools,
 scripts and HookForge capabilities. HookForge should reduce repeated
 investigation and debugging; new modules or scripts alone do not prove that
@@ -39,26 +44,28 @@ interventions must not be presented as general API coverage. See
 
 ## Compose existing capabilities
 
-Build and link the local tool once (Windows Git Bash, native Windows Node/ADB):
+Put Node `22.19.0` from `hookforge/.node-version` on PATH, then build and check
+through the DroidLab root (use `gradlew.bat` in native Windows shells):
 
 ```bash
-npm ci
-npm run build:prod
-npm link
-
-# Run from your sample/project directory, outside HookForge:
-af-frida list
-af-frida plan --replace root,system-properties --trace file-io,system-properties
-af-frida run --serial emulator-5554 --spawn com.scottyab.rootbeer.sample --replace root --trace file-io,system-properties
+./gradlew -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact
+npm --prefix hookforge run cli -- list
+npm --prefix hookforge run cli -- plan --replace root,system-properties --trace file-io,system-properties
+npm --prefix hookforge run cli -- run --serial emulator-5554 --spawn com.scottyab.rootbeer.sample --replace root --trace file-io,system-properties
 ```
 
-Run the first three commands in the HookForge checkout. `npm link` registers
-that local checkout; no registry publication or login is needed. Rebuild after
-source changes without relinking. `npm run cli -- ...` uses the same built Node
-Host. Node is pinned in `.node-version`. The GitHub repository is public;
-`private: true` in package.json deliberately prevents npm registry publication.
+`:hookforge:npmCi` installs locked dependencies and the reviewed Java bridge
+patch. `:hookforge:assemble` builds production bytes; `:hookforge:check` runs
+host checks. `:hookforge:verifyProductionArtifact` also records and verifies
+the production manifest at `.runtime/hookforge/production-manifest.json`.
+Gradle orders the development build in `check` before production when both
+are requested. Manifest `commit` and runtime `checkoutCommit` refer to the
+owning DroidLab commit. `private: true` in package.json prevents npm publication.
 
-To inspect the link, use `command -v af-frida`, `npm prefix -g` and
+An optional `npm --prefix hookforge link` registers `af-frida` for use from an
+external sample directory; no registry publication or login is needed. Prefer
+the root commands above while developing DroidLab. To inspect a link, use
+`command -v af-frida`, `npm prefix -g` and
 `npm ls -g hookforge --depth=0`. If the configured Windows npm prefix is absent
 from Git Bash's PATH, add it for the current shell with
 `export PATH="$(cygpath -u "$(npm prefix -g)"):$PATH"`. No system PATH change is
@@ -117,7 +124,7 @@ implicit replacement.
 For example, with the locked matching server and API33 x86_64 device ready:
 
 ```powershell
-npm run case:rootbeer -- --apk <rootbeer.apk> --serial emulator-5554 --reuse-detect-env
+npm --prefix hookforge run case:rootbeer -- --apk <absolute-rootbeer.apk> --serial emulator-5554 --reuse-detect-env
 ```
 
 `--reuse-detect-env` requires the installed project App. Case guides define
@@ -129,9 +136,9 @@ bounded behavior evidence; a new sample does not need a generic case runner.
 Positional/recipe/smoke entries retain their current behavior:
 
 ```powershell
-npm run build:prod
-node dist/node-cli/run.js --smoke --timeout-ms 75000 -s -c configs/targets/baseline.json <package>
-npm run recipe:network-observe
+./gradlew -Pandroid=false :hookforge:assemble
+node hookforge/dist/node-cli/run.js --smoke --timeout-ms 75000 -s -c hookforge/configs/targets/baseline.json <package>
+npm --prefix hookforge run recipe:network-observe
 ```
 
 The baseline config initializes readiness without hooks. Legacy default target
@@ -144,11 +151,12 @@ the composable `run` command. Recipe output can also mirror to
 Use [Testing Strategy](docs/TESTING_STRATEGY.md) for relevant local checks and
 the existing two CI proof scopes. Host/unit success does not establish actual
 target behavior. Existing production builds, artifact hashes, bridge patch
-checks and Linux/macOS device gates retain their contracts.
+checks and the Linux/API33 device gate retain their contracts. This migration
+does not add a macOS runner or ARM64 CI coverage.
 
 - [API33 preparation and replay](test/api33/README.md)
-- [macOS ARM64 runner](docs/MACOS_RUNNER.md)
+- [macOS and ARM64 scope](docs/MACOS_RUNNER.md)
 - [Event format](docs/EVENT_SCHEMA.md)
 - [Working rules](AGENTS.md)
 - [Contributing and Git workflow](CONTRIBUTING.md)
-- [Independent CI and AgentForge integration](docs/CI.md)
+- [DroidLab CI and source provenance](docs/CI.md)

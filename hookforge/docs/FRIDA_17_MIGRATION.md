@@ -68,7 +68,7 @@ the runtime.
 The migration issue surfaced with a confusing split:
 
 - `frida -U/-Uf/-UF -l script.js` worked on-device
-- `node hosts/node-cli/run.js ...` connected, attached, and loaded the bundle
+- `node hookforge/hosts/node-cli/run.js ...` connected, attached, and loaded the bundle
 - but Java-dependent modules did not activate
 
 Observed symptoms included:
@@ -178,7 +178,7 @@ Use these commands in order when debugging a future Frida upgrade.
 ### Step 1: verify CLI path
 
 ```bash
-npm.cmd run test:smoke:settings
+npm.cmd --prefix hookforge run test:smoke:settings
 ```
 
 If this fails, the problem is not specific to the Node host.
@@ -186,8 +186,8 @@ If this fails, the problem is not specific to the Node host.
 ### Step 2: verify Node host transport path
 
 ```bash
-npm.cmd run test:node:smoke:settings:spawn
-npm.cmd run test:node:smoke:settings:frontmost
+npm.cmd --prefix hookforge run test:node:smoke:settings:spawn
+npm.cmd --prefix hookforge run test:node:smoke:settings:frontmost
 ```
 
 If these fail before loader logs appear, check Frida client/server compatibility
@@ -196,7 +196,7 @@ and host-side attach or spawn flow first.
 ### Step 3: verify Java bridge exposure in Node
 
 ```bash
-npm.cmd run test:node:probe:java
+npm.cmd --prefix hookforge run test:node:probe:java
 ```
 
 If this shows missing global Java but the facade path still works, do not
@@ -205,15 +205,15 @@ rewrite modules back to global `Java`.
 ### Step 4: verify workspace health
 
 ```bash
-npm.cmd run type-check
-npm.cmd run build
-npm.cmd run test:unit
+npm.cmd --prefix hookforge run type-check
+npm.cmd --prefix hookforge run build
+npm.cmd --prefix hookforge run test:unit
 ```
 
 ### Step 5: verify native hook path
 
 ```bash
-npm.cmd run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
+npm.cmd --prefix hookforge run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
 ```
 
 This observes actual APK callers and verifies configured positive/negative

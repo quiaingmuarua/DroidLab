@@ -17,9 +17,11 @@ scripts. Do runtime work inside activation, not at import time.
 [Detection Intervention Contract](../AGENTS.md#detection-intervention-contract)
 applies to shared API acceptance; label target-specific solutions separately.
 
-Build with `npm run build:prod`, then `npm link` in HookForge. From another
-project, `af-frida list/plan/run` uses that checkout's built Host and public
-agent. Your manifests, profiles and scripts can stay outside HookForge; pass
+Build from the DroidLab root with `./gradlew -Pandroid=false :hookforge:assemble`.
+Use `npm --prefix hookforge run cli -- list|plan|run` from that root. From another
+project, invoke the absolute path to `hookforge/dist/node-cli/run.js` with Node,
+or optionally link this module with `npm --prefix hookforge link`.
+Your manifests, profiles and scripts can stay outside HookForge; pass
 their paths as arguments. Relative CLI paths and default `.runtime/frida/runs`
 output belong to the caller (`INIT_CWD` when invoked through npm). Manifest
 entries are relative to the manifest. Only selected managed entries compile;
@@ -170,7 +172,7 @@ business/network hooks are outside this migration.
 ## Runtime owners
 
 - `hosts/node-cli` owns attach/spawn, injection and host output. TypeScript is
-  authoritative; generate its JavaScript entries with `npm run build:hosts`.
+  authoritative; generate its JavaScript entries with `npm --prefix hookforge run build:hosts`.
 - `packages/composition` resolves managed lifetime around one public bundle;
   `api-runtime.ts` owns the shared system API instance.
 - `packages/runtime` owns Java/native bridges; `packages/events` owns the
@@ -178,9 +180,10 @@ business/network hooks are outside this migration.
   bridge and uses `performOnJava`; see [Frida 17 notes](FRIDA_17_MIGRATION.md).
 - `packages/loader`, target configs and registries serve the retained legacy
   positional path. They are separate from the composable capability catalog.
-- Target App and installed-hook sources stay in their owning external project.
-  For example, AgentForge owns its `crackme` and `xposed` modules; these are not
-  directories or build prerequisites in the standalone HookForge checkout.
+- Public Android App sources belong to DroidLab's `labs/`; private installed
+  hooks and research remain with their external consumer. The Node module's
+  host build does not require an Android build; device integration explicitly
+  selects either a locked fixture or an APK built from `labs/`.
 
 ## Retained module and recipe contracts
 

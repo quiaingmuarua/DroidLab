@@ -11,8 +11,8 @@ the public capabilities described in the [workspace README](../../../README.md).
 The legacy file-based configuration below belongs to the positional loader;
 it is not the composable CLI's `--profile` format.
 
-All commands below run from the **repository root**. The `npm --prefix frida`
-commands run their scripts inside `frida/`, so legacy config paths passed to
+All commands below run from the **DroidLab root**. The `npm --prefix hookforge`
+commands run their scripts inside `hookforge/`, so legacy config paths passed to
 those scripts are relative to that directory.
 
 ## Fingerprint collection
@@ -21,15 +21,15 @@ Use the Node version and dependency setup in the workspace README. The legacy
 collector needs the generated host and loader bundle:
 
 ```powershell
-npm run build
-npm run fingerprint:manual -- com.example.app
-npm run fingerprint:manual -- com.example.app --spawn
+npm --prefix hookforge run build
+npm --prefix hookforge run fingerprint:manual -- com.example.app
+npm --prefix hookforge run fingerprint:manual -- com.example.app --spawn
 ```
 
 Replace `com.example.app` with an installed target; the attach form requires a
 running process (a process name can also be supplied). These are alternative
 attach/spawn commands. They require an accessible Frida device and Java runtime.
-`npm run fingerprint` is the optional automatic selector: it
+`npm --prefix hookforge run fingerprint` is the optional automatic selector: it
 looks for running Settings, Chrome or Messages, then falls back to spawning
 `com.android.calculator2`. That package is not present on every device.
 
@@ -42,9 +42,9 @@ The wrapper uses `configs/targets/fingerprint.json`. Its relevant flags are:
 | `host.exitOnCollectionComplete` | When true, the legacy host starts cleanup and exits on `collection_complete` outside smoke mode. It does not impose a fixed completion time. |
 
 With the commands above, JSON is saved on the **host** under
-`frida/output/device_fingerprint_<timestamp>.json`, not on the Android device.
+`hookforge/output/device_fingerprint_<timestamp>.json`, not on the Android device.
 The host resolves `output/` against its working directory; calling
-`node hosts/node-cli/run.js` directly from the repository root would
+`node hookforge/hosts/node-cli/run.js` directly from the DroidLab root would
 instead write under the root `output/` directory.
 
 The result groups values under `device_info`, `sim_info` and `collection_info`.
@@ -86,7 +86,7 @@ Example for the implemented SIM getter hooks:
 }
 ```
 
-Save those data as `spoof_config.json` in the repository root, then make the
+Save those data as `spoof_config.json` in the DroidLab root, then make the
 file readable to the target App at one of the paths above, for example:
 
 ```powershell
@@ -108,7 +108,7 @@ A separate legacy target config selects the strategy:
 The existing `configs/targets/sim-spoofing.json` selects these flags:
 
 ```powershell
-npm run cli -- -c configs/targets/sim-spoofing.json com.example.app
+npm --prefix hookforge run cli -- -c configs/targets/sim-spoofing.json com.example.app
 ```
 
 The host target config selects modules and flags; the JSON pushed to the device
@@ -148,8 +148,8 @@ hooks in this family.
 - To inspect host messages or reduce selected loader modules, use one of:
 
   ```powershell
-  npm run cli -- -v -c configs/targets/fingerprint.json com.example.app
-  npm run cli -- -v -c configs/targets/fingerprint-simple.json com.example.app
+  npm --prefix hookforge run cli -- -v -c configs/targets/fingerprint.json com.example.app
+  npm --prefix hookforge run cli -- -v -c configs/targets/fingerprint-simple.json com.example.app
   ```
 
   The simple config still runs the fingerprint collector; it does not bypass

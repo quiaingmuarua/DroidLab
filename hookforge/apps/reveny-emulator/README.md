@@ -6,13 +6,15 @@ property hooks are prepared in the suspended spawn child before resume; Java
 capabilities and managed entries follow exact process verification. An optional
 Activity declaration is also passed to Frida's spawn API.
 
+Run from the DroidLab root after `:hookforge:assemble`:
+
 ```bash
-npm run cli -- plan --app apps/reveny-emulator/app.json --trace system-properties
-npm run cli -- run --serial emulator-5554 --app apps/reveny-emulator/app.json --trace system-properties
+npm --prefix hookforge run cli -- plan --app hookforge/apps/reveny-emulator/app.json --trace system-properties
+npm --prefix hookforge run cli -- run --serial emulator-5554 --app hookforge/apps/reveny-emulator/app.json --trace system-properties
 ```
 
 Add
-`--replace system-properties --profile cases/reveny-system-properties/risk.json`
+`--replace system-properties --profile hookforge/cases/reveny-system-properties/risk.json`
 or `normal.json` for the five synthetic property inputs. Other findings,
 including the real x86 ABI, remain.
 

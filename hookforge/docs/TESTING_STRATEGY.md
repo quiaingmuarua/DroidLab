@@ -76,7 +76,7 @@ Unit tests also exercise an isolated npm prefix, symlink entry dispatch,
 caller paths with spaces and offline preflight failures. The test builds
 production Hosts as ignored artifacts; it never changes the user's global link.
 
-The retained in-process driver `npm run case:composable -- --apk <detect-env.apk> --serial
+The retained in-process driver `npm --prefix hookforge run case:composable -- --apk <detect-env.apk> --serial
 <serial> [--agent <js> --production-manifest <json>] [--output <new-directory>]`
 runs the existing Duck eight-phase verdict through the new CLI parser, App
 pack, target preparation and session implementation. It saves
@@ -84,7 +84,7 @@ pack, target preparation and session implementation. It saves
 original JSON/Full Report and separate control/API evidence. App observer
 events cannot stand in for the evaluator's SDK caller checks.
 
-`node cases/composable/rootbeer.mjs --apk <fixed-rootbeer.apk> --serial
+`node hookforge/cases/composable/rootbeer.mjs --apk <fixed-rootbeer.apk> --serial
 <serial>` checks the new `root,system-properties` composition using the original
 RootBeer UI. It retains baseline/normal/restored results and screenshots. Use
 the same optional production pair for both commands, then run the unchanged
@@ -109,9 +109,9 @@ intervention. Source review checks that delivered intervention respects the
 canonical contract; a report classification is not an attestation of that fact.
 
 Pinned, open-source detection APKs with fixed identity and hash can be stable
-behavior gates. RootBeer is such a fixture. HookForge standalone CI uses its
-fixed detect-env Release asset; AgentForge integration builds detect-env from
-the consumer checkout. Both record the actual installed hash. Updating either requires
+behavior gates. RootBeer is such a fixture. DroidLab keeps the
+fixed detect-env Release baseline separately from integration with the current
+`labs/` APK. Both record the actual installed hash. Updating either requires
 reviewing the relevant original detection paths and expected behavior.
 
 Apps with changing releases, live services or account prerequisites remain
@@ -120,14 +120,18 @@ over exact event counts, timing, URLs or device identifiers for those targets.
 
 ## Automated Gates
 
-`npm run test:ci` runs source types, separate unit-test/agent types, source lint,
+From the DroidLab root, `./gradlew -Pandroid=false :hookforge:check` invokes
+`npm --prefix hookforge run test:ci`, which runs source types, separate unit-test/agent types, source lint,
 Node unit tests, Python toolchain tests, generated-host consistency and a
 development build. It needs Node from `.node-version` and Python 3.10+; CI pins
 Python 3.11. `API33_PYTHON` can select the tool-test interpreter on either OS.
 
-`npm run build:prod` creates `dist/bundle.js`, `dist/android-api.js` and `dist/node-cli/*.js` without
+`npm --prefix hookforge run build:prod` creates `dist/bundle.js`, `dist/android-api.js` and `dist/node-cli/*.js` without
 overwriting committed development hosts. `artifact:write` and `artifact:verify`
-carry/check exact production bytes between the host and emulator jobs.
+carry/check exact production bytes between the host and emulator jobs. Prefer
+root `:hookforge:verifyProductionArtifact`, which orders production after any
+requested development check and places the manifest in root `.runtime/hookforge`.
+Manifest `commit` and report `checkoutCommit` identify the owning DroidLab commit.
 
 The dependent API 33 CI job first runs four controlled-target mechanism cases:
 
@@ -148,15 +152,13 @@ public hook, and writes under the API33 run's `rootbeer` directory. CI passes
 single-APK-only evidence fails the report and job even if the base suite is green.
 Base-only local reporting remains available by omitting `--case-result`.
 
-Ubuntu retains the x86_64 two-job workflow. The AgentForge-owned Mac ARM64 integration workflow
-runs Host checks and both device scopes in one job, with `--abi arm64-v8a` passed
-to preparation, suite, RootBeer and reporting. The schema-2 toolchain lock maps
-Android ABI to the corresponding Frida server/process architecture and exact
+DroidLab's public device scope is API33 x86_64. ARM64 remains an explicit tool
+option, not a CI claim: this integration registers no macOS runner. The schema-2
+toolchain lock maps Android ABI to Frida server/process architecture and exact
 server hashes. Actual device/process architecture and the selected lock entry
 are evidence, not inferred from the host CPU. A result for one ABI does not
-establish the other. The Mac report also requires ownership-aware emulator
-cleanup via `--cleanup-result`; setup and operations are in
-[Mac runner operations](MACOS_RUNNER.md).
+establish the other. Manual owned-emulator runs require cleanup evidence.
+See [macOS scope](MACOS_RUNNER.md).
 
 `job-result.json` preserves `status`, `suite`, `rootbeer` when requested, and
 step failures. Its additive `proofs` projection contains:
@@ -176,10 +178,10 @@ succeed. A local base-only report can succeed with shared behavior explicitly
 `not-requested`; it proves mechanisms only. Missing or malformed required case
 evidence cannot be replaced by successful mechanism probes.
 
-Markdown-only changes skip the HookForge workflow; mixed changes and manual
-dispatch run both jobs. The fixed detect-env APK comes from this repository's
-test Release; no AgentForge source or Android build is required. See
-[Independent CI](CI.md) for fixtures and optional consumer integration.
+The root DroidLab workflows select checks by module ownership. Fixed detect-env
+and RootBeer assets remain at their original public HookForge Release coordinates;
+using these fixed APKs requires no Android lab build. Current-lab integration is
+separate evidence. See [DroidLab CI](CI.md) for fixture and provenance contracts.
 
 An available VM alone does not mean the Application ClassLoader is ready.
 The loader and Java test agent share `initializeJavaClassLoader`, which probes
@@ -248,7 +250,7 @@ the existing RootBeer + detect-env regression with the same public bytes.
 Use this as the default GitHub Actions gate for the workspace:
 
 ```bash
-npm.cmd run test:ci
+npm.cmd --prefix hookforge run test:ci
 ```
 
 The exact host checks and the two device proof scopes are described above.
@@ -259,7 +261,7 @@ This command alone does not execute device acceptance.
 Use this when validating DetectApp behavior on a device:
 
 ```bash
-npm.cmd run test:device:detectapp
+npm.cmd --prefix hookforge run test:device:detectapp
 ```
 
 ## Smoke Targets
@@ -267,13 +269,13 @@ npm.cmd run test:device:detectapp
 Use these for quick device-level sanity checks before debugging a specific module:
 
 ```bash
-npm.cmd run test:smoke:messages
-npm.cmd run test:smoke:settings
-npm.cmd run test:smoke:detectapp
-npm.cmd run test:smoke:detectapp:passive
-npm.cmd run test:node:smoke:settings:spawn
-npm.cmd run test:node:smoke:settings:frontmost
-npm.cmd run test:node:probe:java
+npm.cmd --prefix hookforge run test:smoke:messages
+npm.cmd --prefix hookforge run test:smoke:settings
+npm.cmd --prefix hookforge run test:smoke:detectapp
+npm.cmd --prefix hookforge run test:smoke:detectapp:passive
+npm.cmd --prefix hookforge run test:node:smoke:settings:spawn
+npm.cmd --prefix hookforge run test:node:smoke:settings:frontmost
+npm.cmd --prefix hookforge run test:node:probe:java
 ```
 
 Recommended usage:
@@ -300,26 +302,26 @@ When a future Frida upgrade breaks Android behavior, debug in this order:
 1. CLI smoke
 
 ```bash
-npm.cmd run test:smoke:settings
+npm.cmd --prefix hookforge run test:smoke:settings
 ```
 
 2. Node host smoke
 
 ```bash
-npm.cmd run test:node:smoke:settings:spawn
-npm.cmd run test:node:smoke:settings:frontmost
+npm.cmd --prefix hookforge run test:node:smoke:settings:spawn
+npm.cmd --prefix hookforge run test:node:smoke:settings:frontmost
 ```
 
 3. Node Java bridge probe
 
 ```bash
-npm.cmd run test:node:probe:java
+npm.cmd --prefix hookforge run test:node:probe:java
 ```
 
 4. Shared API behavior through the original App UI
 
 ```bash
-npm.cmd run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
+npm.cmd --prefix hookforge run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
 ```
 
 Interpretation:

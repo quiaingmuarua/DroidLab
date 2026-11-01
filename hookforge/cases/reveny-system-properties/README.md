@@ -17,20 +17,18 @@ source/license is available at the pinned
 [repository](https://github.com/reveny/Android-Emulator-Detection/tree/6443b933e5aa3fbd44215acbf69835c1c4cce4c1).
 No APK, SDK or native library is copied into committed source.
 
-From the repository root in Git Bash, with native Windows Node/ADB and the
+From the DroidLab root in Git Bash, with native Windows Node/ADB and the
 locked API33 x86_64 / Frida 17.9.1 server ready:
 
 ```bash
 gh release download v1.5.0 --repo reveny/Android-Emulator-Detection \
   --pattern emulator-detection-demo-v1.5.0.apk --dir .runtime/frida/fixtures/reveny
-npm run build:hosts
-npm run build:prod
-npm run artifact:write
-npm run case:reveny-system-properties -- \
+./gradlew -Pandroid=false :hookforge:verifyProductionArtifact
+npm --prefix hookforge run case:reveny-system-properties -- \
   --apk .runtime/frida/fixtures/reveny/emulator-detection-demo-v1.5.0.apk \
   --serial emulator-5554 \
-  --agent dist/android-api.js \
-  --production-manifest .runtime/frida-api33/production-manifest.json
+  --agent hookforge/dist/android-api.js \
+  --production-manifest .runtime/hookforge/production-manifest.json
 ```
 
 The runner verifies the sample before device work and installs with `-r`,

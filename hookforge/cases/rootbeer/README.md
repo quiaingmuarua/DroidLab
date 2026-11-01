@@ -6,14 +6,14 @@
 
 ## 运行
 
-在仓库根目录执行，设备使用 API 33 x86_64 和锁定的 Frida 17.9.1：
+在 DroidLab 根目录执行，设备使用 API 33 x86_64 和锁定的 Frida 17.9.1：
 
 ```powershell
-npm ci
-npm run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
+./gradlew.bat -Pandroid=false :hookforge:assemble
+npm --prefix hookforge run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
 ```
 
-Mac ARM64 lane 显式传 `--abi arm64-v8a`；本地省略 `--abi` 仍默认 x86_64。
+手动 ARM64 环境显式传 `--abi arm64-v8a`；本地省略 `--abi` 仍默认 x86_64。
 server 必须匹配 schema-2 toolchain lock 中选定架构的哈希，固定 RootBeer APK
 也必须包含该 ABI 的 native 库。两个架构各自保留本次 API 调用、结果和恢复证据；
 下面的历史 x86_64 对照表不代表 ARM64 已通过。
@@ -29,7 +29,7 @@ APK，保留数据，操作选定测试设备上的两个应用。APK 签名冲�
 
 ## CI 与预构建产物
 
-CI 从本仓库测试 Release `frida-fixtures-rootbeer-0.9` 下载
+CI 从原公开 `quiaingmuarua/HookForge` 测试 Release `frida-fixtures-rootbeer-0.9` 下载
 `rootbeer-sample-0.9.apk`，按照案例声明的 SHA256 校验。样本不设为 Latest；
 APK 不进入源码，下载失败或校验不符会使 CI 失败。
 
@@ -45,14 +45,16 @@ Node CLI 一起校验。Runner 支持：
 预构建模式只编译只读 UI 适配器，公共 hook 不重新构建。
 结果中的 `agentSource` 为 `production-artifact`，保存 manifest 快照和实际注入哈希。
 未提供生产参数时继续自动构建，`agentSource` 为 `local-build`。
-相对路径按进程当前目录解析；`npm run ...` 的当前目录是 `frida`。
+相对路径按进程当前目录解析；`npm --prefix hookforge run ...` 的进程当前目录是 `hookforge/`。
+从 DroidLab 根目录调用时给 APK、agent、manifest 和 output 传绝对路径；生产manifest由
+`./gradlew -Pandroid=false :hookforge:verifyProductionArtifact` 写入根 `.runtime/hookforge/`。
 
 API33 job 在同一模拟器中先执行四个基础回归，再强制运行本案例及 detect-env 复用。
 案例输出写入该次 API33 结果目录的 `rootbeer` 子目录。统一报告要求案例结果存在、
 Host 判定通过、使用生产产物且开启了复用；基础探针成功本身不能通过完整 CI。
 
-独立的 Mac job 执行相同验收并保留 Ubuntu lane。其 runner/SDK/AVD 隔离、
-清理与产物命名见 [Mac runner 运维说明](../../docs/MACOS_RUNNER.md)。
+本次 DroidLab 整合不迁入 macOS job，不声明 ARM64 CI 覆盖。历史外部runner范围见
+[macOS说明](../../docs/MACOS_RUNNER.md)。
 
 ## 实验与验收
 
@@ -96,7 +98,7 @@ Host 同时检查 API 来源、构造值、对应 APK 结果、非目标文件/�
 ## 文件与输出
 
 - 公共实现：`packages/modules/android-runtime-bypass/api-hooks.ts`；
-  `npm run build:api` 产物为 `dist/android-api.js`。
+  `npm --prefix hookforge run build:api` 产物为 `dist/android-api.js`。
 - `agent.ts` 和 `detect-env-observer.ts`：仅观察界面、定位控件、读取显示结果。
 - `positive.json` / `negative.json`：普通 API 值配置，没有目标类名或 JNI 名称。
 - `run.mjs`：注入同一个公共脚本，驱动真实 UI，管理生命周期。

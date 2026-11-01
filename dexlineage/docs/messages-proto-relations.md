@@ -10,7 +10,7 @@ The initial decoder accepts the observed proto3 layout, presence fields, support
 
 ## Configure the fixed targets
 
-Copy these public examples into an ignored local case directory and replace their fictional service/RPC inputs and field selectors with inspected facts:
+Copy these public examples into an external private case directory and replace their fictional service/RPC inputs and field selectors with inspected facts:
 
 - [Workspace configuration](../examples/proto-relations-workspace.json)
 - [Two-level parent seed rules](../examples/proto-relations-seeds.json)
@@ -52,19 +52,19 @@ The full corpus remains available as context in the run. `proto-catalog.json` re
 
 ## Run, review and publish
 
-After the normal JVM build, use the installed CLI:
+From the DroidLab root, run `./gradlew -Pandroid=false :dexlineage:build :dexlineage:installDist`, then use the installed CLI. The paths below illustrate an external private workspace; replace them with your actual location:
 
 ```powershell
 $cli = '.\build\install\dexlineage\bin\dexlineage.bat'
-& $cli analysis run --method messages.proto-relations --config .local\proto\proto-relations-workspace.json --work .local\proto\source-work
-& $cli analysis status --work .local\proto\source-work
+& $cli analysis run --method messages.proto-relations --config ..\private-research\dexlineage\proto\proto-relations-workspace.json --work ..\private-research\dexlineage\proto\source-work
+& $cli analysis status --work ..\private-research\dexlineage\proto\source-work
 ```
 
 At `WAITING_REVIEW`, use the returned `runPath` and `packetPath`. Read the parent metadata, child code and dependency evidence. Copy `review-template.json` out of the immutable workspace, fill the action, confidence, semantic rationale and unverified scope, then submit it:
 
 ```powershell
-& $cli analysis submit --run '<runPath>' --review .local\proto\source-review.json
-& $cli analysis resume --work .local\proto\source-work
+& $cli analysis submit --run '<runPath>' --review ..\private-research\dexlineage\proto\source-review.json
+& $cli analysis resume --work ..\private-research\dexlineage\proto\source-work
 ```
 
 Selected invalid tasks need no artificial Review. A valid ACCEPT still requires a unique result and the existing evidence/conflict checks. `resume` freezes the journal revisions and publishes; repeated COMPLETE resumes return the same package.
@@ -77,12 +77,12 @@ Give the source publication's **unchanged** `knowledge.json` to the existing Mig
 
 ```powershell
 $sourceKnowledge = '<source knowledgePath>'
-& $cli migration prepare --knowledge $sourceKnowledge --source-apk .local\proto\source.apk --target-apk .local\proto\target.apk --run .local\proto\migration-1
-& $cli migration publish --run .local\proto\migration-1 --out .local\proto\target-round-1
-& $cli migration prepare --knowledge $sourceKnowledge --source-apk .local\proto\source.apk --target-apk .local\proto\target.apk --target-base .local\proto\target-round-1\knowledge.json --run .local\proto\migration-2
-& $cli migration publish --run .local\proto\migration-2 --out .local\proto\target-round-2
-& $cli migration prepare --knowledge $sourceKnowledge --source-apk .local\proto\source.apk --target-apk .local\proto\target.apk --target-base .local\proto\target-round-2\knowledge.json --run .local\proto\migration-3
-& $cli migration tasks --run .local\proto\migration-3 --state ALL
+& $cli migration prepare --knowledge $sourceKnowledge --source-apk ..\private-research\dexlineage\proto\source.apk --target-apk ..\private-research\dexlineage\proto\target.apk --run ..\private-research\dexlineage\proto\migration-1
+& $cli migration publish --run ..\private-research\dexlineage\proto\migration-1 --out ..\private-research\dexlineage\proto\target-round-1
+& $cli migration prepare --knowledge $sourceKnowledge --source-apk ..\private-research\dexlineage\proto\source.apk --target-apk ..\private-research\dexlineage\proto\target.apk --target-base ..\private-research\dexlineage\proto\target-round-1\knowledge.json --run ..\private-research\dexlineage\proto\migration-2
+& $cli migration publish --run ..\private-research\dexlineage\proto\migration-2 --out ..\private-research\dexlineage\proto\target-round-2
+& $cli migration prepare --knowledge $sourceKnowledge --source-apk ..\private-research\dexlineage\proto\source.apk --target-apk ..\private-research\dexlineage\proto\target.apk --target-base ..\private-research\dexlineage\proto\target-round-2\knowledge.json --run ..\private-research\dexlineage\proto\migration-3
+& $cli migration tasks --run ..\private-research\dexlineage\proto\migration-3 --state ALL
 ```
 
 Inspect the ready targets, submit continuity Reviews with the existing Migration format, then publish and run `knowledge verify`. The target set and semantic names remain fixed by the source knowledge. Unresolved children preserve their last confirmed source instead of receiving guessed target bindings. The source's parent address cannot satisfy a target dependency.

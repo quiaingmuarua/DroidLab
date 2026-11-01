@@ -1,7 +1,7 @@
 # API 33 detect-env Frida 验证
 
 Frida CI 在 rootable AOSP API 33 模拟器中运行四个用例，使用固定测试 Release 中的 `com.detect.app.sample`。
-HookForge CI 使用 x86_64；AgentForge 保留的 Mac 集成使用其当前构建的 arm64-v8a APK。
+DroidLab 公共 CI 使用 x86_64；本次整合不迁入 macOS runner，也不声明 ARM64 CI 覆盖。
 行为断言和清理均成功才返回 `0`，失败返回非零并保存证据。
 
 `prepare.py`、`suite.py`、`run.py`、`report.py` 和 RootBeer runner 接受
@@ -40,119 +40,99 @@ Java agent 显式导入仓库的 Java Bridge。Frida 17 的 `create_script()` �
 
 ## 环境准备
 
-使用 `.node-version` 指定的 Node、Python 3.10+ 和 Android SDK；Actions 固定使用 Python 3.11。`ANDROID_HOME`、`JAVA_HOME` 和 PATH 应指向工具。本工作区的工具位于 `.runtime/toolchain`。
+以下命令从 **DroidLab 根目录** 执行。使用 `hookforge/.node-version` 指定的
+Node 22.19.0、Python 3.10+ 和 Android SDK；Actions 固定 Python 3.11。
+`ANDROID_HOME`、`JAVA_HOME` 和 PATH 应指向相应工具。宿主检查与生产构建由根 Gradle 编排：
 
-在仓库根目录执行：
-
-先按下方命令下载并校验固定 APK。Windows 已安装 SDK、且 API 33 x86_64 模拟器已连接时，可直接用 PowerShell
-复用同一套 Python 工具。`prepare.py` 在项目 `.runtime` 中创建匹配的 Python
-client 和 server，不依赖系统 `frida` 命令的版本：
-
-```powershell
-python test/api33/prepare.py
-npm run build:prod
-npm run artifact:write
-$fridaTools = Get-Content -LiteralPath .runtime/frida-api33/toolchain.json -Raw | ConvertFrom-Json
-$fridaResults = ".runtime/frida-api33/results/local-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-& $fridaTools.python test/api33/suite.py `
-  --apk .runtime/fixtures/detect-env-api33-x86_64.apk `
-  --serial emulator-5554 --output $fridaResults
-python -X utf8 test/api33/report.py --output $fridaResults
+```bash
+./gradlew -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact
+python3 hookforge/test/api33/prepare.py \
+  --tools-root .runtime/toolchain/python \
+  --output .runtime/frida-api33/toolchain.json
 ```
 
-上面的 suite 用于验证公共运行环境；单个目标脚本通常只需要运行该目标。
-首次连接 RootBeer 等样本可用 `configs/targets/baseline.json` 关闭业务 Hook，
-避免默认 profile 改变正在观察的检测行为。
+Windows PowerShell 使用 `./gradlew.bat` 和 `python`。prepare 报告中的 `python`
+字段提供所创建的匹配 Frida client 解释器；`server` 字段指向已校验的 Android server。
+模块内默认输出仍在 `hookforge/.runtime`，上述显式参数把本轮工具与证据放在根 `.runtime`。
+
+`prepare.py` 从模块 npm 锁文件读取 Frida 精确版本，创建 Python venv，安装匹配
+client，并下载/校验 server。server 与压缩包 SHA256 来自 `toolchain.lock.json`。
+`--check-only` 只校验已有环境；损坏缓存不能作为回退。可用 `--python`、`--node`、
+`--server` 指定绝对路径；解释器保留 venv 入口，不解析成系统 Python。
+
+`:hookforge:npmCi` 保留 postinstall，对 `frida-java-bridge@7.0.13` 应用已审阅补丁。
+metadata 固定官方 npm tarball、原始及修改后字节哈希；补丁不引入固定等待或重试。
+`npm --prefix hookforge run check:bridge-patch` 可单独校验。
+production manifest schema 2 的 `commit` 与 API33 schema 3 的 `checkoutCommit`
+均指向 **DroidLab 提交**。模块文件仍相对 `hookforge/`，不要求 `hookforge/.git`。
+补丁、锁文件和实际安装字节必须一致；更换后需重装、重建、重新记录证据。
 
 ### 固定测试 APK
 
-独立仓库下载固定测试 APK；不需要 JDK、Gradle 或 AgentForge 源码。
-固定身份、下载坐标和哈希以 [fixture.json](fixture.json) 为准：
+以下下载保留原公开 HookForge Release 的固定坐标及历史构建来源，不上传或重发资产。
+完整身份和哈希以 [fixture.json](fixture.json) 为准。下载固定 APK 无须构建 Android labs：
 
 ```bash
 mkdir -p .runtime/fixtures
-gh release download fixtures-detect-env-ee69bb3 --repo quiaingmuarua/HookForge   --pattern detect-env-api33-x86_64.apk --output .runtime/fixtures/detect-env-api33-x86_64.apk
-node scripts/fixture.mjs .runtime/fixtures/detect-env-api33-x86_64.apk
+gh release download fixtures-detect-env-ee69bb3 --repo quiaingmuarua/HookForge \
+  --pattern detect-env-api33-x86_64.apk --output .runtime/fixtures/detect-env-api33-x86_64.apk
+node hookforge/scripts/fixture.mjs .runtime/fixtures/detect-env-api33-x86_64.apk
 ```
 
-以下步骤用于完整 suite 的构建和准备；单独运行案例时采用该案例说明中的命令：
-
-```bash
-npm ci
-npm run build:hosts
-npm run test:ci
-npm run build:prod
-npm run artifact:write
-python test/api33/prepare.py
-```
-
-Linux 设备准备可安装 `platform-tools`、`emulator` 和
-`system-images;android-33;default;x86_64`，再运行 `scripts/start-api33-emulator.sh`。
-Windows 使用 Git Bash 和原生 Windows SDK，启动已有 API33 x86_64 AVD；不使用 WSL。
-测试资产的来源、更新和独立 CI 见 [CI 说明](../../docs/CI.md)。
-
-`prepare.py` 从 npm 锁文件读取 Frida 精确版本，创建 Python venv、安装匹配的 client，下载并校验匹配的 server。server 和压缩包的 SHA256 来自 `toolchain.lock.json`；升级 npm Frida 时必须同步更新这个校验锁。缓存目录中的损坏文件会失败，不会被当作可用 server。
-
-`npm ci` 的 postinstall 将 `frida-java-bridge@7.0.13` 应用到仓库声明的补丁字节：
-`patches/frida-java-bridge-7.0.13.patch.json` 同时固定官方 npm tarball 的完整性、
-原始源码和修改后源码的 SHA256。补丁在 ART hook 保护安装后执行
-`Interceptor.flush()`，再同步已有 replacement method 的入口；它不引入固定等待
-或行为重试。`npm run check:bridge-patch` 可单独检查安装状态。
-
-准备报告和每个运行用例都记录实际校验过的 `javaBridgePatch`；生产 manifest 使用
-schema 2，write/verify 均核验已安装源码，记录补丁 ID、metadata SHA256 与
-原始/修改后源码 SHA256。suite/report 拒绝缺少这些身份的旧证据，不能仅凭相同 npm
-版本接受未打补丁的安装。报告期望值只读取已提交的 lock/metadata，因此 npm 安装失败、
-`node_modules` 不存在时仍能写出初始化失败报告。更换补丁后必须重新安装、生产构建并生成
-本轮 manifest 和运行证据；源码校验本身不代表设备行为通过。
-
-AgentForge Mac 集成（不属于 HookForge CI）使用专属 runner root 内的 Android SDK、uv 管理的 Python 3.11 和每轮新
-venv。准备时传 `--abi arm64-v8a --python <新venv/bin/python>`，让
-`--tools-root` 仅保留已校验 server 缓存；`--output` 的 toolchain 报告属于本轮。
-调用 suite 时同时传本轮 `--toolchain` 和 `--production-manifest`。
-模拟器由 `emulator.py start|stop` 管理独立 AVD，替代 Linux 的 KVM/Action 准备。
-路径约束、LaunchAgent、完整运行顺序与清理见
-[Mac runner 运维说明](../../docs/MACOS_RUNNER.md)。
-
-可指定 `--python /absolute/path/to/venv/bin/python`、`--node /absolute/path/to/node`、`--server /absolute/path/to/server`、`--tools-root /absolute/path/cache` 和 `--output /absolute/path/toolchain.json`。`--check-only` 校验现有环境并输出报告，不安装或下载工具。解释器路径保留 venv 入口，不将符号链接解析为系统 Python。
-
-启动包装脚本调用 `emulator.py start`，等待模拟器 ready 后返回，不再前台挂住。
-默认仍使用 x86_64、端口 5554；每次生成独立输出目录，并打印该次
-`emulator.py stop --output <目录>` 命令。测试后执行打印的 stop 命令，保留归属记录和
-`cleanup.json`。日志与 `state.json` 位于该次输出目录。
-启动要求所选主机/镜像具备可用硬件加速，不再在缺少 KVM 时自动退回 `-accel off`。
-Mac CI 显式选择 ARM64 和端口 5580，其独立 SDK/AVD 配置见运维说明。
+当前 `labs/` 源码构建出的 APK 是另一个验证输入，保留自己的构建与安装哈希，不能改写
+固定 fixture 的历史元数据。使用同一份生产 bundle 比较机制/行为，不能把单项集成
+结果写成完整四组合 suite 通过。
 
 ## 复跑
 
-已准备好的本工作区可单独运行 Python 探针：
+先准备已连接的 rootable API33 x86_64 模拟器。Linux 可安装相应 SDK image；
+Windows 使用原生 SDK 和现有 AVD，不使用 WSL。四项完整机制回归在 Bash 中执行：
 
 ```bash
-bash scripts/run-api33-test.sh --mode attach
-bash scripts/run-api33-test.sh --mode spawn
-```
-
-完整执行四个用例时，先运行生产构建和 `artifact:write`，并提供新的输出目录：
-
-```bash
-python3 test/api33/suite.py \
+.runtime/toolchain/python/venv/bin/python hookforge/test/api33/suite.py \
+  --toolchain .runtime/frida-api33/toolchain.json \
+  --production-manifest .runtime/hookforge/production-manifest.json \
   --apk .runtime/fixtures/detect-env-api33-x86_64.apk \
-  --output .runtime/frida-api33/results/my-new-run
-python3 test/api33/report.py \
+  --serial emulator-5554 --output .runtime/frida-api33/results/my-new-run
+python3 hookforge/test/api33/report.py \
   --output .runtime/frida-api33/results/my-new-run
 ```
 
-指定 `android.injected.build.abi` 时 AGP 将 APK 写入 `intermediates/apk/debug` 并标记 `testOnly`；包装脚本也支持标准的 `outputs/apk/debug`。安装使用 `adb install -r -t`。suite 可用 `--toolchain` 指向准备报告，`--adb`、`--serial`、`--production-manifest` 指定外部工具和产物。
+PowerShell 可从 JSON 取得解释器：
 
-单独运行正式 Node 用例：
+```powershell
+$fridaTools = Get-Content .runtime/frida-api33/toolchain.json -Raw | ConvertFrom-Json
+& $fridaTools.python hookforge/test/api33/suite.py `
+  --toolchain .runtime/frida-api33/toolchain.json `
+  --production-manifest .runtime/hookforge/production-manifest.json `
+  --apk .runtime/fixtures/detect-env-api33-x86_64.apk `
+  --serial emulator-5554 --output .runtime/frida-api33/results/my-new-run
+python hookforge/test/api33/report.py --output .runtime/frida-api33/results/my-new-run
+```
+
+每次使用全新结果目录。上面的 base-only 报告仅声明运行机制；完整公共行为验收还需
+在同一轮运行 RootBeer＋detect-env case，并向报告传 `--case-result`。RootBeer的
+npm案例对相对路径采用进程当前目录，根目录调用时应给 APK、agent、manifest、output
+传绝对路径。参见 [RootBeer](../../cases/rootbeer/README.md)。
+
+单项正式 Node 用例可使用准备报告里的 Python 解释器运行：
 
 ```bash
-python3 test/api33/run.py --serial emulator-5554 \
+.runtime/toolchain/python/venv/bin/python hookforge/test/api33/run.py \
+  --serial emulator-5554 --host node --mode spawn \
   --apk /absolute/path/detect-env-debug.apk \
-  --server /absolute/path/frida-server --host node --mode spawn
+  --server /absolute/path/frida-server \
+  --production-manifest .runtime/hookforge/production-manifest.json \
+  --output .runtime/frida-api33/results/my-new-single-case
 ```
 
-该命令需要已安装 Python Frida，可用准备报告中的 `python` 解释器执行。Node 用例运行 `dist/node-cli/run.js` 和 `dist/bundle.js`，逐个校验生产产物哈希、checkout SHA、Node 版本和依赖锁哈希。开发 hosts 位于 `hosts/node-cli`，生产构建将 CLI 写入 `dist/node-cli`，不会覆盖开发 hosts。
+API33 安装器使用 `adb install -r -t`，支持固定 testOnly APK。其它 case 可能只用 `-r`，
+应遵守各 case 的 APK要求。正式Node用例校验 `hookforge/dist` 生产字节、DroidLab提交、
+Node版本和依赖锁哈希，开发hosts仍在 `hookforge/hosts/node-cli`。
+
+模块保留 `emulator.py start|stop` 和 `--abi arm64-v8a`，便于明确准备过的手动环境。
+模拟器工具按归属记录清理自己的进程/AVD，要求硬件加速，不以 `-accel off` 回退。
+本轮没有公共macOS/ARM64 lane；历史外部runner范围见 [macOS说明](../../docs/MACOS_RUNNER.md)。
 
 ## 失败条件和证据
 
@@ -181,7 +161,7 @@ suite 不覆盖旧结果；一项失败仍保留其他独立用例的结果，�
 Actions Summary 分开展示两类证明和案例对照。只验证基础运行环境时可省略该参数，
 公共行为状态明确为 `not-requested`，不能把该次成功解释为检测干预验证通过。
 
-Mac 完整 lane 在汇总前停止本轮模拟器，并传
+手动使用自管模拟器时，在汇总前停止本轮模拟器，并传
 `--cleanup-result <emulator/cleanup.json>`；缺失、损坏或失败的清理证据会使报告失败。
 每轮结果目录必须全新；只有证据上传与模拟器清理都成功，workflow 才删除带有匹配
 run ID/attempt 归属标记的临时目录。初始化、上传或资源清理失败时保留可用证据。
