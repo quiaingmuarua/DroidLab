@@ -27,9 +27,11 @@ object FixturePreflight {
                 val directives = Files.readString(configuration).lineSequence().map { it.substringBefore('#').trim() }.filter { it.isNotEmpty() }.toList()
                 check("-dontshrink" in directives && "-dontoptimize" in directives) { "Fixture must preserve code and disable optimization" }
                 check(directives.none { it == "-dontobfuscate" }) { "Fixture unexpectedly disables renaming" }
+                val mapId = mappingText.lineSequence().single { it.startsWith("# pg_map_id: ") }.substringAfter(": ")
+                check(mapId.matches(Regex("[0-9a-f]{64}"))) { "Expected the pinned R8 full Mapping identifier" }
                 val raw = RawDex.read(apk).classes
-                check(raw.values.all { cls -> cls.sourceFiles.all { it in setOf("fixture", "SourceFile") } }) {
-                    "Original SourceFile information survived in fixture or support classes"
+                check(raw.values.all { cls -> cls.sourceFiles.all { it == "r8-map-id-$mapId" } }) {
+                    "Fixture SourceFile must contain only the exact anonymous identifier from its R8 Mapping"
                 }
                 val oracle = oracles.getValue(versionId)
                 val logger = oracle.descriptor(manifest.loggerClass)

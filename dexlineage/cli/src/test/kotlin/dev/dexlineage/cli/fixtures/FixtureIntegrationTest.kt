@@ -461,5 +461,5 @@ class FixtureIntegrationTest {
     private fun apk(version: String) = repo.resolve(manifest.versions.getValue(version).apk)
     private fun displayedName(descriptor: String, alias: String): String = descriptor.removePrefix("L").removeSuffix(";")
         .substringBeforeLast('/', "").let { if (it.isEmpty()) alias else "${it.replace('/', '.')}.$alias" }
-    private fun requiredPath(property: String): Path = Path.of(requireNotNull(System.getProperty(property)) { "Run ./gradlew fixtureIntegrationTest; missing $property" }).toAbsolutePath()
+    private fun requiredPath(property: String): Path = Path.of(requireNotNull(System.getProperty(property)) { "Run ./gradlew :dexlineage:fixtureIntegrationTest from the DroidLab root; missing $property" }).toAbsolutePath()
 }

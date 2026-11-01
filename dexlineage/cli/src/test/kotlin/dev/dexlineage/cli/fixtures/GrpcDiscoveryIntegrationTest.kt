@@ -5,6 +5,7 @@ import dev.dexlineage.knowledge.KnowledgeFiles
 import dev.dexlineage.migration.*
 import dev.dexlineage.model.*
 import dev.dexlineage.messages.MessagesRpcArtifacts
+import jadx.api.plugins.input.insns.Opcode
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -71,6 +72,10 @@ class GrpcDiscoveryIntegrationTest {
             val guard = oracle.getValue(version).method(namespace + "ThemeChecks", "check", "(ZLjava/lang/String;Ljava/lang/Object;)V")
             assertNotEquals("check", guard.name)
             assertTrue(guard in configCalls && factory in configCalls)
+            val guardBody = dex.classes.getValue(guard.owner).methods.single { it.ref == guard }.instructions
+            assertTrue(guardBody.any { it.opcode == Opcode.NEW_INSTANCE && it.typeReference == "Ljava/lang/IllegalArgumentException;" },
+                "The diagnostic-guard fixture must retain local exception construction instead of R8 outlining")
+            assertEquals(1, guardBody.count { it.opcode == Opcode.THROW }, "The guard must keep its explicit failure throw")
             mapOf("version" to version, "factory" to factory, "rpc" to rpc, "requestField" to requestField,
                 "roleAssignmentOrder" to roleAssignments, "deepConfiguration" to deepConfig, "diagnosticGuard" to guard,
                 "apkSha256" to dex.apkSha256)

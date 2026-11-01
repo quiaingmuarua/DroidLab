@@ -155,6 +155,7 @@ def main() -> int:
                          'abi': abi,
                          'release': adb('shell', 'getprop', 'ro.build.version.release'),
                          'fingerprint': adb('shell', 'getprop', 'ro.build.fingerprint')})
+        # checkoutCommit identifies DroidLab; ROOT only locates the HookForge module.
         result['host'] = {'frida': frida.__version__, 'python': sys.version.split()[0],
                           'node': command([args.node, '--version']),
                           'checkoutCommit': command(['git', '-C', ROOT, 'rev-parse', 'HEAD'])}

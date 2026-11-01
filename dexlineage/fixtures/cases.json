@@ -3,14 +3,14 @@
   "purpose": "Independent oracle for self-authored APK integration regression fixtures; never passed to the production matcher.",
   "packagePrefix": "dev.dexlineage.fixture.cases",
   "loggerClass": "dev.dexlineage.fixture.support.FixtureLogger",
-  "expectedR8Version": "8.10.24",
+  "expectedR8Version": "9.4.24",
   "versions": {
     "v1": {
       "tag": "FixtureScopeV1",
       "factoryClass": "dev.dexlineage.fixture.support.LoggerFactory",
       "factoryMethod": "create",
       "wrongSignatureMethod": "createCounted",
-      "apk": "fixtures/android/build/outputs/apk/v1/release/fixture-apk-v1-release-unsigned.apk",
+      "apk": "fixtures/android/build/fixture-inputs/v1Release/fixture-v1Release.apk",
       "mapping": "fixtures/android/build/outputs/mapping/v1Release/mapping.txt",
       "configuration": "fixtures/android/build/outputs/mapping/v1Release/configuration.txt"
     },
@@ -19,7 +19,7 @@
       "factoryClass": "dev.dexlineage.fixture.support.LoggerFactory",
       "factoryMethod": "build",
       "wrongSignatureMethod": "buildCounted",
-      "apk": "fixtures/android/build/outputs/apk/v2/release/fixture-apk-v2-release-unsigned.apk",
+      "apk": "fixtures/android/build/fixture-inputs/v2Release/fixture-v2Release.apk",
       "mapping": "fixtures/android/build/outputs/mapping/v2Release/mapping.txt",
       "configuration": "fixtures/android/build/outputs/mapping/v2Release/configuration.txt"
     }

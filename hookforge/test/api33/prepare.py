@@ -14,6 +14,7 @@ import sys
 import urllib.request
 import zipfile
 
+# Module files remain relative to hookforge/, while Git discovers DroidLab above it.
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 # Android ABI, Frida release asset architecture, Process.arch, ELF e_machine.
@@ -26,6 +27,7 @@ def sha256(path: Path) -> str:
 
 
 def checkout_commit() -> str:
+    """Return the DroidLab source commit without requiring hookforge/.git."""
     value = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
                                     text=True, timeout=30).strip()
     if len(value) != 40 or any(character not in '0123456789abcdef' for character in value):

@@ -42,7 +42,8 @@ class ProtoIntegrationTest {
 
     private fun preflight() {
         val checks = listOf("v1", "v2").map { version ->
-            val source = fixture.resolve("build/generated/source/proto/${version}Release/java/${namespace.replace('.', '/')}ParentMessage.java")
+            val generationTask = "generate${version.replaceFirstChar { it.uppercase() }}ReleaseProto"
+            val source = fixture.resolve("build/generated/java/$generationTask/java/${namespace.replace('.', '/')}ParentMessage.java")
             assertTrue(Files.readString(source).contains("Protobuf Java Version: 3.25.3"), "Pinned protoc must generate the test source")
             val code = RawDex.read(apk(version))
             val oracle = oracles.getValue(version)

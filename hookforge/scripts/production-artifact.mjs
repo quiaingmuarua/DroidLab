@@ -7,15 +7,20 @@ import { isDeepStrictEqual } from 'node:util';
 import { applyBridgePatch } from './patch-java-bridge.mjs';
 
 const fridaRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = fridaRoot;
+// HookForge is a source directory in DroidLab, not a nested Git repository.
+const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+  cwd: fridaRoot,
+  encoding: 'utf8',
+}).trim();
 const manifestPath =
-  process.argv[3] || path.join(repoRoot, '.runtime/frida-api33/production-manifest.json');
+  process.argv[3] || path.join(fridaRoot, '.runtime/frida-api33/production-manifest.json');
 const files = [
   'dist/bundle.js',
   'dist/android-api.js',
   ...['run', 'run-recipe', 'recipe-runner', 'parse-log'].map(name => `dist/node-cli/${name}.js`),
 ];
 const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+// Schema 2's commit is the owning DroidLab checkout commit.
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
   cwd: repoRoot,
   encoding: 'utf8',

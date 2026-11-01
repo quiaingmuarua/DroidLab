@@ -12,7 +12,7 @@ const metadataPath = 'patches/frida-java-bridge-7.0.13.patch.json';
 function fixture(t: TestContext) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frida-production-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const frida = path.join(root, 'frida');
+  const frida = path.join(root, 'hookforge');
   const script = path.join(frida, 'scripts/production-artifact.mjs');
   const manifest = path.join(root, 'manifest.json');
   for (const relative of [
@@ -43,8 +43,9 @@ function fixture(t: TestContext) {
     fs.writeFileSync(target, '// production fixture');
   }
   const git = (...args: string[]) => {
-    const result = spawnSync('git', args, { cwd: frida, encoding: 'utf8', windowsHide: true });
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
     assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
   };
   git('init', '--quiet');
   git(
@@ -67,34 +68,13 @@ function fixture(t: TestContext) {
   return { root, frida, manifest, artifact, git };
 }
 
-test('a gitlink pins its own checkout and production provenance never uses the consumer commit', t => {
+test('a plain HookForge directory records its owning DroidLab checkout without a nested Git repository', t => {
   const { root, frida, manifest, artifact, git } = fixture(t);
-  const parentGit = (...args: string[]) => {
-    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout.trim();
-  };
-  const childCommit = spawnSync('git', ['rev-parse', 'HEAD'], {
-    cwd: frida,
-    encoding: 'utf8',
-    windowsHide: true,
-  }).stdout.trim();
-  parentGit('init', '--quiet');
-  parentGit('update-index', '--add', '--cacheinfo', `160000,${childCommit},frida`);
-  parentGit(
-    '-c',
-    'user.name=Fixture',
-    '-c',
-    'user.email=fixture@example.test',
-    'commit',
-    '--quiet',
-    '-m',
-    'consumer pins tool'
-  );
-  const consumerCommit = parentGit('rev-parse', 'HEAD');
-  assert.notEqual(consumerCommit, childCommit);
+  const sourceCommit = git('rev-parse', 'HEAD');
+  assert.equal(fs.existsSync(path.join(root, '.git')), true);
+  assert.equal(fs.existsSync(path.join(frida, '.git')), false);
   assert.equal(artifact('write').status, 0);
-  assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).commit, childCommit);
+  assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).commit, sourceCommit);
   git(
     '-c',
     'user.name=Fixture',
@@ -104,15 +84,16 @@ test('a gitlink pins its own checkout and production provenance never uses the c
     '--allow-empty',
     '--quiet',
     '-m',
-    'tool evolves independently'
+    'DroidLab source changes'
   );
-  assert.equal(parentGit('rev-parse', 'HEAD:frida'), childCommit);
+  assert.notEqual(git('rev-parse', 'HEAD'), sourceCommit);
   assert.notEqual(
     artifact('verify').status,
     0,
-    'old production bytes belong to the previous tool commit'
+    'old production bytes belong to the previous DroidLab source commit'
   );
   assert.equal(artifact('write').status, 0);
+  assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).commit, git('rev-parse', 'HEAD'));
   assert.equal(artifact('verify').status, 0);
 });
 
