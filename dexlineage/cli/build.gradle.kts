@@ -6,11 +6,11 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":analysis"))
-    implementation(project(":jadx"))
-    implementation(project(":migration"))
+    implementation(project(":dexlineage:analysis"))
+    implementation(project(":dexlineage:jadx"))
+    implementation(project(":dexlineage:migration"))
     runtimeOnly("org.slf4j:slf4j-simple:2.0.13")
-    testImplementation(project(":jadx"))
+    testImplementation(project(":dexlineage:jadx"))
     testImplementation("net.fabricmc:mapping-io:0.6.1")
     testImplementation("io.github.skylot:jadx-core:1.5.0")
     testImplementation("io.github.skylot:jadx-dex-input:1.5.0")
@@ -25,9 +25,9 @@ application {
 distributions {
     main {
         contents {
-            from(rootProject.file("LICENSE"))
-            from(rootProject.file("THIRD_PARTY_NOTICES.md"))
-            from(rootProject.file("licenses")) { into("licenses") }
+            from(rootProject.file("dexlineage/LICENSE"))
+            from(rootProject.file("dexlineage/THIRD_PARTY_NOTICES.md"))
+            from(rootProject.file("dexlineage/licenses")) { into("licenses") }
         }
     }
 }
@@ -56,7 +56,7 @@ tasks.register<Test>("realCaseTest") {
     }
 }
 
-val fixtureProject = rootProject.findProject(":fixture-apk")
+val fixtureProject = rootProject.findProject(":dexlineage:fixture-apk")
 val fixtureBuildTiming = layout.buildDirectory.file("fixture-integration/apk-build.json")
 var fixtureBuildStartedNanos = 0L
 
@@ -65,7 +65,7 @@ val prepareFixtureApkBuild by tasks.registering {
     description = "Check the Android SDK before building the public fixture module."
     doLast {
         check(fixtureProject != null) {
-            "Enable the fixture module with -PandroidFixtures=true, then run fixtureIntegrationTest or buildFixtureApks."
+            "Android modules are disabled. Remove -Pandroid=false or use -Pandroid=true, then run :dexlineage:fixtureIntegrationTest."
         }
         fixtureBuildStartedNanos = System.nanoTime()
         fixtureBuildTiming.get().asFile.apply {
@@ -81,8 +81,8 @@ val prepareFixtureApkBuild by tasks.registering {
             ?: System.getenv("ANDROID_SDK_ROOT")?.takeIf { it.isNotBlank() }
             ?: error("fixtureIntegrationTest requires ANDROID_HOME or sdk.dir in the root local.properties")
         val sdk = rootProject.file(sdkValue)
-        check(sdk.resolve("platforms/android-35/android.jar").isFile && sdk.resolve("build-tools/35.0.0").isDirectory) {
-            "Install Android SDK platforms;android-35 and build-tools;35.0.0 in $sdk"
+        check(sdk.resolve("platforms/android-35/android.jar").isFile && sdk.resolve("build-tools/36.0.0").isDirectory) {
+            "Install Android SDK platforms;android-35 and build-tools;36.0.0 in $sdk"
         }
     }
 }
@@ -95,7 +95,7 @@ val buildFixtureApks by tasks.registering {
     description = "Build both R8 APK flavors of the standard fixture-apk Android module."
     dependsOn(prepareFixtureApkBuild)
     if (fixtureProject != null) {
-        dependsOn(":fixture-apk:assembleV1Release", ":fixture-apk:assembleV2Release")
+        dependsOn(":dexlineage:fixture-apk:exportV1ReleaseFixtureApk", ":dexlineage:fixture-apk:exportV2ReleaseFixtureApk")
     }
     doLast {
         val elapsedMillis = (System.nanoTime() - fixtureBuildStartedNanos) / 1_000_000
@@ -115,8 +115,8 @@ tasks.register<Test>("fixtureIntegrationTest") {
     workingDir = rootProject.projectDir
     maxHeapSize = "1g"
     maxParallelForks = 1
-    systemProperty("dexlineage.fixtureRoot", rootProject.file("fixtures/android").absolutePath)
-    systemProperty("dexlineage.fixtureCases", rootProject.file("fixtures/cases.json").absolutePath)
+    systemProperty("dexlineage.fixtureRoot", rootProject.file("dexlineage/fixtures/android").absolutePath)
+    systemProperty("dexlineage.fixtureCases", rootProject.file("dexlineage/fixtures/cases.json").absolutePath)
     systemProperty("dexlineage.distributionDir", rootProject.layout.buildDirectory.dir("install/dexlineage").get().asFile.absolutePath)
     systemProperty("dexlineage.fixtureResults", layout.buildDirectory.dir("fixture-integration").get().asFile.absolutePath)
     outputs.upToDateWhen { false }

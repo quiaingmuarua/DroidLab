@@ -97,7 +97,7 @@ protobuf {
 
 dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
-    implementation project(':crackme:crackme-native-lib')
+    implementation project(':labs:crackme-native-lib')
     implementation "com.xa.mass:xa-mass-android-capability-http:${rootProject.ext.xaMassWorkerSdkVersion}"
     // gRPC - 更新到兼容版�?
     implementation "io.grpc:grpc-okhttp:1.59.0"
@@ -140,3 +140,7 @@ dependencies {
 }
 
 
+
+tasks.named('preBuild') {
+    dependsOn ':labs:verifyWorkerSdk'
+}

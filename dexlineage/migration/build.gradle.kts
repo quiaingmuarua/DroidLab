@@ -4,7 +4,7 @@ plugins {
 }
 
 dependencies {
-    api(project(":knowledge"))
-    implementation(project(":jadx"))
+    api(project(":dexlineage:knowledge"))
+    implementation(project(":dexlineage:jadx"))
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.13")
 }

@@ -4,7 +4,7 @@ plugins {
 }
 
 dependencies {
-    api(project(":knowledge"))
+    api(project(":dexlineage:knowledge"))
     implementation("io.github.skylot:jadx-core:1.5.0")
     implementation("io.github.skylot:jadx-dex-input:1.5.0")
     implementation("io.github.skylot:jadx-rename-mappings:1.5.0")

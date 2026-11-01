@@ -24,7 +24,7 @@ _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 _MAX_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
-_MARKER = ".agentforge-xa-mass-release.json"
+_MARKER = ".droidlab-xa-mass-release.json"
 _MARKER_SCHEMA_VERSION = 2
 _ARCHIVE_CACHE_DIRECTORY = "xa-mass-release-cache"
 _SDK_ARTIFACTS = (
@@ -347,7 +347,7 @@ def verify_archive(
 ) -> dict[str, Any]:
     _verify_archive_hash(archive, lock, component)
     root_name = _inspect_zip(archive, lock, component)
-    with tempfile.TemporaryDirectory(prefix="agentforge-xa-mass-verify-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="droidlab-xa-mass-verify-") as temporary:
         staging = Path(temporary)
         with zipfile.ZipFile(archive) as payload:
             payload.extractall(staging)
@@ -458,7 +458,7 @@ def _require_owned_destination(
 ) -> Path:
     runtime_directory = _runtime_directory(lock_path).resolve()
     if runtime_directory.is_symlink():
-        raise ReleaseResolutionError("AgentForge .runtime cannot be a symlink")
+        raise ReleaseResolutionError("DroidLab .runtime cannot be a symlink")
     expected = default_destination(lock_path, component).resolve(strict=False)
     if destination.resolve(strict=False) != expected:
         raise ReleaseResolutionError(
@@ -497,7 +497,7 @@ def _download(lock: dict[str, Any], component: str, output: Path) -> None:
         f"v{lock['version']}/{asset_name}"
     )
     request = urllib.request.Request(
-        url, headers={"User-Agent": "AgentForge-XA-Mass-Release-Resolver/1"}
+        url, headers={"User-Agent": "DroidLab-XA-Mass-Release-Resolver/1"}
     )
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
@@ -579,6 +579,29 @@ def resolve(
             shutil.rmtree(staging)
 
 
+def verify_installed(lock_path: Path, component: str) -> dict[str, Any]:
+    """Verify prepared bytes without downloading, repairing or writing cache state."""
+    resolved_lock = lock_path.resolve()
+    lock = load_lock(resolved_lock)
+    runtime_directory = _runtime_directory(resolved_lock)
+    target = default_destination(resolved_lock, component)
+    archive = _archive_cache_path(runtime_directory, lock, component)
+    if runtime_directory.is_symlink() or archive.parent.is_symlink() or archive.is_symlink():
+        raise ReleaseResolutionError("XA Mass prepared cache cannot be a symlink")
+    if not target.is_dir() or not archive.is_file():
+        raise ReleaseResolutionError(
+            f"XA Mass {component} is not prepared. From the DroidLab root run: "
+            f"python -m droidlab_tools release resolve --component {component} "
+            "--lock XA_MASS_RELEASE.lock.json"
+        )
+    if not _marker_matches(target, lock, component):
+        raise ReleaseResolutionError("XA Mass prepared cache identity differs from the lock")
+    _verify_archive_hash(archive, lock, component)
+    root_name = _inspect_zip(archive, lock, component)
+    _verify_extracted_tree(target, archive, root_name, component)
+    return verify_component(target, lock, component)
+
+
 def _write_github_output(
     path: Path, component: str, root: Path, lock: dict[str, Any]
 ) -> None:
@@ -591,13 +614,12 @@ def _write_github_output(
 
 
 def main(arguments: list[str] | None = None) -> int:
-    repository_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
     parser.add_argument("--component", choices=tuple(_COMPONENTS), required=True)
     parser.add_argument(
         "--lock",
         type=Path,
-        default=repository_root / "XA_MASS_RELEASE.lock.json",
+        required=True,
     )
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--archive", type=Path)

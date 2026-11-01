@@ -11,13 +11,57 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-from agentforge_tools import release as resolver
+from droidlab_tools import release as resolver
 
 
 COMMIT = "a" * 40
 
 
 class ReleaseResolverTest(unittest.TestCase):
+
+    def test_verification_is_read_only_and_never_downloads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, sdk, lock_path, lock = self.fixture(root)
+            target, _ = resolver.resolve(lock_path, "worker-sdk", archive=sdk)
+            before = {
+                str(path.relative_to(root)): (path.read_bytes(), path.stat().st_mtime_ns)
+                for path in root.rglob("*") if path.is_file()
+            }
+            with patch.object(resolver, "_download", side_effect=AssertionError("network")):
+                manifest = resolver.verify_installed(lock_path, "worker-sdk")
+            self.assertEqual(lock["gitCommit"], manifest["gitCommit"])
+            self.assertEqual(before, {
+                str(path.relative_to(root)): (path.read_bytes(), path.stat().st_mtime_ns)
+                for path in root.rglob("*") if path.is_file()
+            })
+            binary = next((target / "repository").rglob("*.aar"))
+            binary.write_bytes(b"tampered")
+            with patch.object(resolver, "_download", side_effect=AssertionError("network")):
+                with self.assertRaisesRegex(resolver.ReleaseResolutionError, "content differs"):
+                    resolver.verify_installed(lock_path, "worker-sdk")
+            self.assertEqual(b"tampered", binary.read_bytes())
+
+    def test_verification_does_not_create_missing_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, _, lock_path, _ = self.fixture(root)
+            with patch.object(resolver, "_download", side_effect=AssertionError("network")):
+                with self.assertRaisesRegex(resolver.ReleaseResolutionError, "is not prepared"):
+                    resolver.verify_installed(lock_path, "worker-sdk")
+            self.assertFalse((root / ".runtime").exists())
+
+    def test_verification_rejects_a_changed_lock_without_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, sdk, lock_path, lock = self.fixture(root)
+            target, _ = resolver.resolve(lock_path, "worker-sdk", archive=sdk)
+            marker = (target / resolver._MARKER).read_bytes()
+            lock["gitCommit"] = "b" * 40
+            lock_path.write_text(json.dumps(lock), encoding="utf-8")
+            with self.assertRaisesRegex(resolver.ReleaseResolutionError, "identity differs"):
+                resolver.verify_installed(lock_path, "worker-sdk")
+            self.assertEqual(marker, (target / resolver._MARKER).read_bytes())
 
     @staticmethod
     def archive_cache(

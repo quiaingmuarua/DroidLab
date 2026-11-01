@@ -14,7 +14,7 @@ import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCK_PATH = Path("crackme/detect-env/duck-sdk.lock.json")
+LOCK_PATH = Path("labs/detect-env/duck-sdk.lock.json")
 
 
 def sha256(path: Path) -> str:
@@ -42,7 +42,7 @@ def load_lock(root: Path = ROOT) -> dict:
 
 
 def download(url: str, target: Path) -> None:
-    request = urllib.request.Request(url, headers={"User-Agent": "AgentForge-Duck-SDK/1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "DroidLab-Duck-SDK/1"})
     with urllib.request.urlopen(request, timeout=180) as response, target.open("wb") as stream:
         shutil.copyfileobj(response, stream)
 
@@ -74,6 +74,25 @@ def resolve(root: Path = ROOT, archive: Path | None = None) -> dict:
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)
+    return {"path": str(destination.resolve()), "tag": lock["tag"],
+            "commit": lock["commit"], "sha256": lock["sha256"]}
+
+
+def verify_installed(root: Path = ROOT) -> dict:
+    """Read and verify the prepared AAR without creating or repairing files."""
+    lock = load_lock(root)
+    destination = root / ".runtime/duck-detector/sdk" / lock["asset"]
+    if any(path.is_symlink() for path in (
+        root / ".runtime", root / ".runtime/duck-detector", destination.parent, destination
+    )):
+        raise ValueError("Duck SDK prepared cache cannot be a symlink")
+    if not destination.is_file():
+        raise ValueError(
+            "Duck SDK is not prepared. From the DroidLab root run: "
+            "python -m droidlab_tools duck-sdk resolve"
+        )
+    if sha256(destination) != lock["sha256"]:
+        raise ValueError(f"Duck SDK SHA256 differs from lock: {destination}")
     return {"path": str(destination.resolve()), "tag": lock["tag"],
             "commit": lock["commit"], "sha256": lock["sha256"]}
 

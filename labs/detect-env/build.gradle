@@ -13,20 +13,6 @@ def workerGroupId = providers
 
 def duckSdk = new groovy.json.JsonSlurper().parse(file('duck-sdk.lock.json'))
 def duckAar = rootProject.file(".runtime/duck-detector/sdk/${duckSdk.asset}")
-if (!duckAar.isFile()) {
-    throw new GradleException('Duck SDK is missing. Run: python -m agentforge_tools duck-sdk resolve')
-}
-def duckDigest = java.security.MessageDigest.getInstance('SHA-256')
-duckAar.withInputStream { stream ->
-    byte[] buffer = new byte[1024 * 1024]
-    int count
-    while ((count = stream.read(buffer)) != -1) {
-        duckDigest.update(buffer, 0, count)
-    }
-}
-if (duckDigest.digest().encodeHex().toString() != duckSdk.sha256) {
-    throw new GradleException('Duck SDK SHA256 differs from duck-sdk.lock.json; refusing to build.')
-}
 
 android {
     namespace 'com.detect.app.sample'
@@ -107,7 +93,7 @@ dependencies {
     implementation files(duckAar)
     duckSdk.dependencies.each { coordinate -> implementation coordinate }
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
-    implementation project(':crackme:crackme-native-lib')
+    implementation project(':labs:crackme-native-lib')
     implementation "com.xa.mass:xa-mass-android-worker:${rootProject.ext.xaMassWorkerSdkVersion}"
     implementation "com.xa.mass:xa-mass-android-capability-http:${rootProject.ext.xaMassWorkerSdkVersion}"
     implementation 'com.google.code.gson:gson:2.8.8'
@@ -124,89 +110,30 @@ dependencies {
     implementation 'io.github.happylishang:antifake:1.7.0'
 }
 
-def workerProofProvenance = layout.buildDirectory.file(
-        'outputs/worker-proof/detect-env-debug.provenance.json'
-)
-def workerProofApk = layout.buildDirectory.file(
-        'outputs/worker-proof/detect-env-debug.apk'
-)
-def workerProofApkDirectory = objects.directoryProperty()
-androidComponents.onVariants(androidComponents.selector().withBuildType('debug')) { variant ->
-    workerProofApkDirectory.set(variant.artifacts.get(SingleArtifact.APK.INSTANCE))
+tasks.named('preBuild') {
+    dependsOn ':labs:verifyWorkerSdk', ':labs:verifyDuckSdk'
 }
 
-tasks.register('workerProofArtifact') {
-    group = 'verification'
-    description = 'Builds the configured detect-env proof APK and provenance.'
-    dependsOn 'testDebugUnitTest', 'assembleDebug'
-    inputs.property('runtimeApiBaseUrl', workerRuntimeApiBaseUrl)
-    inputs.property('workerGroupId', workerGroupId)
-    inputs.dir(workerProofApkDirectory)
-    outputs.file(workerProofProvenance)
-    outputs.file(workerProofApk)
-    outputs.upToDateWhen { false }
-
-    doLast {
-        def runtimeApi = workerRuntimeApiBaseUrl.trim()
-        def groupId = workerGroupId.trim()
-        if (!runtimeApi) {
-            throw new GradleException(
-                    'agentforgeWorkerRuntimeApiBaseUrl is required for Worker proof artifacts.'
-            )
+androidComponents.onVariants(androidComponents.selector().withBuildType('debug')) { variant ->
+    def apkDirectory = variant.artifacts.get(SingleArtifact.APK.INSTANCE)
+    def builtArtifactsLoader = variant.artifacts.getBuiltArtifactsLoader()
+    def currentApk = apkDirectory.map { directory ->
+        def artifacts = builtArtifactsLoader.load(directory)
+        if (artifacts == null || artifacts.elements.size() != 1) {
+            throw new GradleException('Debug APK export requires exactly one APK in the Android artifact metadata.')
         }
-        if (!groupId) {
-            throw new GradleException(
-                    'agentforgeWorkerGroupId is required for Worker proof artifacts.'
-            )
+        def apk = new File(artifacts.elements.iterator().next().outputFile)
+        if (!apk.isFile() || !apk.toPath().normalize().startsWith(directory.asFile.toPath().normalize())) {
+            throw new GradleException('Debug APK metadata does not identify a file inside its Android artifact directory.')
         }
-        def apkFile = workerProofApkDirectory.file('detect-env-debug.apk').get().asFile
-        if (!apkFile.isFile()) {
-            throw new GradleException("Worker proof APK is missing: ${apkFile}")
+        return apk
+    }
+    tasks.register('exportDebugApk', Sync) {
+        group = 'distribution'
+        description = 'Exports the current Debug APK from the Android artifact provider for public CI.'
+        from(currentApk) {
+            rename { 'detect-env-debug.apk' }
         }
-        def packagedApk = workerProofApk.get().asFile
-        packagedApk.parentFile.mkdirs()
-        java.nio.file.Files.copy(
-                apkFile.toPath(),
-                packagedApk.toPath(),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING
-        )
-        def digest = java.security.MessageDigest.getInstance('SHA-256')
-        apkFile.withInputStream { input ->
-            byte[] buffer = new byte[1024 * 1024]
-            int read
-            while ((read = input.read(buffer)) != -1) {
-                digest.update(buffer, 0, read)
-            }
-        }
-        def apkSha256 = digest.digest().collect {
-            String.format('%02x', it & 0xff)
-        }.join()
-        def commit = providers.exec {
-            commandLine 'git', '-C', rootProject.projectDir, 'rev-parse', 'HEAD'
-        }.standardOutput.asText.get().trim()
-        if (!(commit ==~ /[0-9a-f]{40}/)) {
-            throw new GradleException('AgentForge HEAD is not a full Git SHA.')
-        }
-        def provenanceFile = workerProofProvenance.get().asFile
-        def releaseLock = new groovy.json.JsonSlurper().parse(rootProject.file('XA_MASS_RELEASE.lock.json'))
-        provenanceFile.parentFile.mkdirs()
-        provenanceFile.text = groovy.json.JsonOutput.prettyPrint(
-                groovy.json.JsonOutput.toJson([
-                        schemaVersion    : 2,
-                        agentforgeCommit : commit,
-                        artifactName     : packagedApk.name,
-                        apkSha256        : apkSha256,
-                        applicationId    : 'com.detect.app.sample',
-                        buildVariant     : 'debug',
-                        runtimeApiBaseUrl: runtimeApi,
-                        workerGroupId    : groupId,
-                        xaMassRelease    : [
-                                version: releaseLock.version,
-                                gitCommit: releaseLock.gitCommit,
-                                runtimeZipSha256: releaseLock.assets.serverRuntime.sha256,
-                                sdkZipSha256: releaseLock.assets.workerSdk.sha256,
-                        ],
-                ])
-        ) + System.lineSeparator()
+        into(rootProject.layout.projectDirectory.dir('.runtime/ci/current-apk'))
     }
 }

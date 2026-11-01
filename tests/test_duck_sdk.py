@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from agentforge_tools import duck_sdk
+from droidlab_tools import duck_sdk
 
 
 class DuckSdkResolverTest(unittest.TestCase):
@@ -46,6 +46,26 @@ class DuckSdkResolverTest(unittest.TestCase):
         archive.write_bytes(self.payload)
         result = duck_sdk.resolve(self.root, archive)
         self.assertEqual(self.payload, Path(result["path"]).read_bytes())
+
+    def test_verification_is_read_only_and_rejects_tampering(self):
+        archive = self.root / "download.aar"
+        archive.write_bytes(self.payload)
+        result = duck_sdk.resolve(self.root, archive)
+        destination = Path(result["path"])
+        modified_at = destination.stat().st_mtime_ns
+        with patch.object(duck_sdk, "download", side_effect=AssertionError("network")):
+            self.assertEqual(result, duck_sdk.verify_installed(self.root))
+            self.assertEqual(modified_at, destination.stat().st_mtime_ns)
+            destination.write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "SHA256"):
+                duck_sdk.verify_installed(self.root)
+        self.assertEqual(b"tampered", destination.read_bytes())
+
+    def test_verification_does_not_prepare_a_missing_cache(self):
+        with patch.object(duck_sdk, "download", side_effect=AssertionError("network")):
+            with self.assertRaisesRegex(ValueError, "is not prepared"):
+                duck_sdk.verify_installed(self.root)
+        self.assertFalse((self.root / ".runtime").exists())
 
 
 if __name__ == "__main__":

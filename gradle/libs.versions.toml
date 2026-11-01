@@ -1,5 +1,6 @@
 [versions]
 agp = "9.4.1"
+kotlin = "2.4.21"
 protobufPlugin = "0.10.0"
 ndk = "27.0.12077973"
 junit = "4.13.2"
@@ -18,6 +19,7 @@ material = { group = "com.google.android.material", name = "material", version.r
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposedApi" }
 
 [plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 protobuf = { id = "com.google.protobuf", version.ref = "protobufPlugin" }
