@@ -12,9 +12,13 @@ internal object RpcRecipe {
         val descriptorType: String, val builderType: String,
         val requestDeclarationType: String, val responseDeclarationType: String,
         val requestImplementationType: String, val responseImplementationType: String,
-        val related: Set<String>, val offset: Int)
+        val related: Set<String>, val offset: Int, val construction: Construction? = null)
+    /** Retained typed relationships for local runtime bindings; never inferred from relatedRefs. */
+    internal data class Construction(val nameField: Field, val requestField: Field, val responseField: Field,
+        val builderFields: Map<String, Field>, val nameCall: CallEvent, val buildCall: CallEvent,
+        val descriptorConstructor: MethodId, val requestConstructor: MethodId, val responseConstructor: MethodId)
     internal data class Inspection(val bindings: List<Binding>, val unknown: Boolean, val detail: String)
-    private data class Marshaller(val messageType: String, val implementationType: String, val related: Set<String>)
+    private data class Marshaller(val messageType: String, val implementationType: String, val related: Set<String>, val constructor: MethodId)
     internal data class RelatedType(val type: String, val status: MatchStatus, val binding: Binding, val detail: String)
 
     fun execute(s: DexFactSession, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): List<MatchFact> {
@@ -106,7 +110,7 @@ internal object RpcRecipe {
         }
     }
 
-    private fun inspect(s: DexFactSession, rule: RuleRevision, method: Method, service: String, rpc: String): Inspection {
+    internal fun inspect(s: DexFactSession, rule: RuleRevision, method: Method, service: String, rpc: String): Inspection {
         val trace = s.trace(method)
         if (!trace.complete) return Inspection(emptyList(), true, trace.reason ?: "Unreadable descriptor construction")
         val nameCalls = trace.calls.filter { call -> call.args == listOf(Value.Text(service), Value.Text(rpc)) && call.method.result == "Ljava/lang/String;" }
@@ -174,7 +178,9 @@ internal object RpcRecipe {
                         related += req.related; related += res.related
                         bindings += Binding(method.id, req.messageType, res.messageType, descriptor, build.method.owner,
                             labels.getValue("request").type, labels.getValue("response").type,
-                            req.implementationType, res.implementationType, related.filter { it in s.classes }.toSet(), name.offset)
+                            req.implementationType, res.implementationType, related.filter { it in s.classes }.toSet(), name.offset,
+                            Construction(labels.getValue("name"), labels.getValue("request"), labels.getValue("response"),
+                                builderFields.toMap(), name, build, constructor.method, req.constructor, res.constructor))
                     }
                 }
             }
@@ -213,7 +219,7 @@ internal object RpcRecipe {
             is Value.Allocation -> {
                 val constructor = constructions[value] ?: return null
                 val defaults = constructor.args.mapNotNull { defaultInstance(s, it) }.distinct()
-                return defaults.singleOrNull()?.let { Marshaller(it, value.type, setOf(value.type, constructor.method.owner)) }
+                return defaults.singleOrNull()?.let { Marshaller(it, value.type, setOf(value.type, constructor.method.owner), constructor.method) }
             }
             is Value.Invocation -> {
                 if (depth <= 0 || value.receiver != null) return null
@@ -225,7 +231,7 @@ internal object RpcRecipe {
                     (argument as? Value.Parameter)?.takeIf { it.index >= 0 }?.let { value.args.getOrNull(it.index) } ?: argument
                 }
                 val defaults = supplied.mapNotNull { defaultInstance(s, it) }.distinct()
-                return defaults.singleOrNull()?.let { Marshaller(it, allocation.type, setOf(value.method.owner, allocation.type)) }
+                return defaults.singleOrNull()?.let { Marshaller(it, allocation.type, setOf(value.method.owner, allocation.type), constructor.method) }
             }
             else -> return null
         }
