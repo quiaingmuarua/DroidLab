@@ -35,6 +35,8 @@ internal class DexFactSession(val artifact: Artifact, anchors: Set<String>, want
     data class DirectCall(val source: MethodId, val target: MethodId, val offset: Int)
     val wantedCallSites = mutableListOf<DirectCall>()
     private val recipeCache = mutableMapOf<String, Any>()
+    private val uses = sortedMapOf<String, MutableList<StringUseSite>>()
+    private val indexedCalls = mutableSetOf<String>()
     @Suppress("UNCHECKED_CAST")
     fun <T : Any> cachedRecipe(key: String, create: () -> T): T = recipeCache.getOrPut(key, create) as T
     val scan: ScanResult
@@ -42,8 +44,9 @@ internal class DexFactSession(val artifact: Artifact, anchors: Set<String>, want
     init {
         Digests.verify(artifact)
         val began = System.nanoTime()
-        val uses = anchors.sorted().associateWith { mutableListOf<StringUseSite>() }
+        anchors.sorted().forEach { uses[it] = mutableListOf() }
         val callKeys = wantedCalls.map { "${it.owner.descriptor}->${it.name}${it.descriptor}" }.toSet()
+        indexedCalls.addAll(callKeys)
         var methodCount = 0L; var instructionCount = 0L; var stringCount = 0L
         try {
             ZipFile(artifact.path).use { zip ->
@@ -97,6 +100,44 @@ internal class DexFactSession(val artifact: Artifact, anchors: Set<String>, want
         scan = ScanResult(classes.mapValues { it.value.ref.dexEntry }, uses,
             ScanStats(classes.size, methodCount, instructionCount, stringCount, (System.nanoTime() - began) / 1_000_000, emptyList()))
         Digests.verify(artifact)
+    }
+
+    /** Add only newly requested indices while retaining the loaded DEX inventory. */
+    fun ensureQueries(literals: Set<String>, methods: Set<MethodRef>) {
+        val newStrings = literals - uses.keys
+        val newCalls = methods.map { "${it.owner.descriptor}->${it.name}${it.descriptor}" }.toSet() - indexedCalls
+        if (newStrings.isEmpty() && newCalls.isEmpty()) return
+        newStrings.forEach { uses[it] = mutableListOf() }
+        try {
+            classes.values.forEach { cls ->
+                cls.data.visitFieldsAndMethods({}, { method ->
+                    val source = method.methodRef.also { it.load() }
+                    val sourceId = MethodId(cls.ref.descriptor, source.name, source.argTypes.toList(), source.returnType)
+                    method.codeReader?.visitInstructions { insn ->
+                        if (newStrings.isNotEmpty() && insn.opcode == Opcode.CONST_STRING) {
+                            insn.decode()
+                            val literal = insn.indexAsString
+                            if (literal in newStrings) uses.getValue(literal).add(StringUseSite(cls.ref.dexEntry,
+                                cls.ref.descriptor, sourceId.shortId, insn.offset, insn.fileOffset, literal))
+                        } else if (newCalls.isNotEmpty() && insn.opcode.name.startsWith("INVOKE_")) {
+                            insn.decode()
+                            if (insn.indexType == InsnIndexType.METHOD_REF) {
+                                val target = insn.indexAsMethod.also { it.load() }
+                                val targetId = MethodId(target.parentClassType, target.name, target.argTypes.toList(), target.returnType)
+                                if (targetId.key in newCalls) {
+                                    callOwners.getOrPut(targetId.key) { linkedSetOf() } += cls.ref.descriptor
+                                    wantedCallSites += DirectCall(sourceId, targetId, insn.offset)
+                                }
+                            }
+                        }
+                    }
+                })
+            }
+            indexedCalls.addAll(newCalls)
+            Digests.verify(artifact)
+        } catch (e: Exception) {
+            throw ExecutionException("Incomplete incremental DEX fact scan: ${e.message}", e)
+        }
     }
 
     fun ref(owner: String): ClassRef = classes[owner]?.ref ?: throw ExecutionException("DEX class missing: $owner")

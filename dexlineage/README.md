@@ -2,12 +2,12 @@
 
 DexLineage is a reusable APK analysis project. Version 0.4 provides two scenes:
 
-- **Analysis:** import manual annotations or discover clues, combine built-in matching with compiled application strategies, resolve supporting anchors over immutable rounds, then review and publish class names.
+- **Analysis:** import manual annotations or discover clues, combine built-in matching with compiled application strategies, resolve supporting symbols within one execution, then review and publish class names.
 - **Migration:** freeze existing semantic targets, resolve their rules and dependencies in another APK, review continuity, and publish new bindings with unresolved history retained.
 
 Every new published binding requires a unique, definite result from actual code matching. Multiple candidates are invalid. An Agent can revise the rule and start another run, but cannot choose a candidate through Review text or a HIGH confidence declaration.
 
-Supporting CLASS or METHOD anchors are mechanical matching results, not Rename entries. A UNIQUE anchor can be published without a semantic Review and consumed by a later round. Final class names require review of the owner and the supporting evidence chain. All output Mapping rows remain class-only.
+Supporting CLASS or METHOD anchors are mechanical matching results, not Rename entries. A UNIQUE anchor is available to dependent rules in the same execution and may be published without a semantic Review. Final class names require review of the owner and the supporting evidence chain. All output Mapping rows remain class-only.
 
 ## Build from a clean checkout
 
@@ -67,33 +67,26 @@ The verification chain is **R8 APK → coding matching → published knowledge J
 
 CI runs JVM checks on Ubuntu 24.04 and Windows, and the APK suite on Ubuntu 24.04. Public reports, command logs and generated fixture APK/Mapping/configuration are retained as CI artifacts for 14 days. See [fixture maintenance and failure diagnosis](docs/fixture-testing.md). Passing these cases does not establish coverage of all APKs or all obfuscators.
 
-## Run and resume an analysis method
+## Run an analysis method once
 
-An analysis method combines existing matching operations into a finite, recoverable flow. `messages.grpc` owns the observed Messages RPC shapes and topic policy; `messages.proto-relations` follows numbered fields from a verified Proto parent; `profile` runs the existing generic discovery/template flow. JADX is the current fact-reading implementation. No method can bypass matching, Review or publication checks.
+`analysis run` combines the method's prerequisite matching, discovery, target matching and review-packet output in one offline execution. Direct rules need no prerequisite setup. Declared CLASS/METHOD symbols are evaluated in dependency order and reused; no intermediate knowledge publication or stage workspace is created.
 
-Copy [the gRPC workspace configuration](examples/grpc-workspace.json), [seed rules](examples/grpc-anchor-rules.json) and [discovery profile](examples/grpc-discovery-profile.json) under `../private-research/dexlineage/`, then set the APK path and observed service/RPC inputs. Alternatively use [the profile workspace configuration](examples/profile-workspace.json) with a logger profile. Relative configuration paths are resolved from the configuration file. Optional `baseKnowledge` and `referenceKnowledge` paths are explicit inputs; expected obfuscated targets are never matching inputs.
-
-```powershell
-& $cli analysis run --method messages.grpc --config ..\private-research\dexlineage\grpc-workspace.json --work ..\private-research\dexlineage\topic-work-001
-& $cli analysis status --work ..\private-research\dexlineage\topic-work-001
-# After interruption, resume the same frozen inputs and implementation.
-& $cli analysis resume --work ..\private-research\dexlineage\topic-work-001
-```
-
-The gRPC method declares three seed rounds; Proto relations declares two; `profile` has none. The shared flow then discovers, prepares rules and writes a review packet. It stops at `WAITING_REVIEW` and returns `runPath` and `packetPath`. Read `summary.md` and `review-packet.json`, copy `review-template.json` to a separate review file, and fill the semantic judgment, rationale and limitations after reading the linked evidence. The template pre-fills proof/evidence identities but contains no automatic HIGH/ACCEPT decision.
-
-See [one-hop Proto relation analysis](docs/messages-proto-relations.md) for fixed field-number targets, optional workspace corpus input, explicit zero-match tasks, and migration of the resulting independent knowledge package.
+Copy [the gRPC configuration](examples/grpc-workspace.json), [seed definitions](examples/grpc-anchor-rules.json) and [discovery profile](examples/grpc-discovery-profile.json) into your private project. The historical example filename does not imply a recoverable workspace. [The profile configuration](examples/profile-workspace.json) supports logger discovery without seeds. Relative paths resolve from the configuration file; optional same-APK base/reference knowledge and corpus retain their existing meaning.
 
 ```powershell
-& $cli analysis submit --run '<runPath>' --review ..\private-research\dexlineage\review.json
-& $cli analysis resume --work ..\private-research\dexlineage\topic-work-001
+& $cli analysis run --method messages.grpc --config ../private-research/dexlineage/grpc-workspace.json --work ../private-research/dexlineage/topic-001
 ```
 
-Once the selected review scope has decisions, explicit `resume` freezes the Review revisions and publishes to a new directory. Invalid, rejected and deferred tasks remain visible; unreviewed targets outside the selected scope do not block the reviewed topic. `COMPLETE` resume returns the same publication. Later Review revisions can still be published with the existing explicit `analysis publish` command.
+The result identifies one `runPath`, the discovery output when available and `packetPath`. Read its summary and evidence, copy the blank review template, and fill semantic judgments. No HIGH/ACCEPT decision is supplied. Then explicitly submit and publish:
 
-Workspace records coordinate progress; existing runs, Review journals and knowledge packages remain authoritative. A completed stage is reused only after its full output set and digests validate. Incomplete attempts are preserved and retried in a fresh attempt directory on explicit resume. Changing the inputs or implementation requires a new workspace. There is one writer per workspace, no background scheduler or automatic rule repair.
+```powershell
+& $cli analysis submit --run '<runPath>' --review ../private-research/dexlineage/review.json
+& $cli analysis publish --run '<runPath>' --out ../private-research/dexlineage/published-001
+```
 
-The individual commands below remain available. To generate the same work package for a manually prepared run, add `--out` to `analysis inspect`; without `--out`, its previous evidence-list output is unchanged.
+Use `tasks` and `inspect` to read saved results. `analysis status/resume` are retired and return migration guidance. Interrupted or failed work is rerun in a new directory; no checkpoint adoption or automatic retry occurs. Old completed run/Review/knowledge formats remain readable and replayable; historical workspace recovery requires its original tool revision.
+
+See [one-hop Proto analysis](docs/messages-proto-relations.md) for fixed field targets and corpus input. Both scenes support `inspect --out <new-directory>` to generate a review packet; omit `--task` with `--out` to include all current tasks. This does not change matching or publication eligibility.
 
 ## Analyze an APK
 
@@ -118,15 +111,9 @@ Use `tasks --state INVALID` and `inspect` to investigate invalid results. Their 
 
 ## Discover Messages gRPC request and response classes
 
-The gRPC flow starts with a verified framework class and method, then follows raw DEX call references across the APK. [The anchor example](examples/grpc-anchor-rules.json) uses one observed service/RPC to establish a descriptor METHOD, its actual Descriptor CLASS, and the unique static full-name function. Prepare/publish three immutable rounds, passing each publication as the next base. The full-name rule checks the observed `argument0 + "/" + argument1` StringBuilder implementation; an old obfuscated method name is never an input.
+The gRPC flow starts with a verified framework class and method, then follows raw DEX call references across the APK. [The anchor example](examples/grpc-anchor-rules.json) uses one observed service/RPC to establish a descriptor METHOD, its actual Descriptor CLASS, and the unique static full-name function. The analysis method resolves this chain within its one execution; no seed publication is required. The full-name rule checks the observed `argument0 + "/" + argument1` StringBuilder implementation; an old obfuscated method name is never an input.
 
-After the `grpc.full-name` anchor is ready, use [the discovery profile](examples/grpc-discovery-profile.json):
-
-```powershell
-& $cli analysis discover --apk 'D:\apks\current.apk' --profile ..\private-research\dexlineage\grpc-profile.json --base-knowledge ..\private-research\dexlineage\anchors-r3\knowledge.json --out ..\private-research\dexlineage\grpc-discovery
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\grpc-discovery\rules.json --base-knowledge ..\private-research\dexlineage\anchors-r3\knowledge.json --reference-knowledge ..\private-research\dexlineage\existing\knowledge.json --run ..\private-research\dexlineage\grpc-analysis
-& $cli analysis tasks --run ..\private-research\dexlineage\grpc-analysis --service example.Service --state ALL --limit 100
-```
+Use the `messages.grpc` method above for prerequisite discovery and target matching in one invocation. The lower-level `analysis discover` command remains available when you deliberately provide an existing same-APK anchor package.
 
 Discovery writes `discovery.json`, `rpc-catalog.json` and class rule drafts. It records all direct calls to the framework anchor, including dynamic/configuration uses and unsupported constructions. The reader binds the name, builder and both marshaller roles to one Descriptor construction. Request/response types come from their respective default instances, with no assumption about field order, constructor parameter order, outer method return type or unary-only RPCs.
 
@@ -134,7 +121,7 @@ Discovery writes `discovery.json`, `rpc-catalog.json` and class rule drafts. It 
 
 `--reference-knowledge` may be repeated with explicit same-APK packages. Only after unique matching does Analysis reuse a matching confirmed binding's semantic ID and canonical name. References supply identity, not accepted Reviews, matching proofs or dependency anchors: each adopted class needs this run's evidence and Review. Publication contains base entries and newly approved entries, not the entire reference package. Conflicting identities, changed reference inputs and wrong APKs are rejected. Existing names that cannot be justified should be deferred rather than silently changed.
 
-## Import manual work and execute dependency rounds
+## Import manual work and resolve symbol dependencies
 
 Import a JADX `projectVersion=1` annotation project into a new corpus directory:
 
@@ -155,21 +142,19 @@ Investigate selected manual targets before writing rules:
 
 Research reads the corpus's frozen source APK and preserves owner annotations alongside raw class/member identities, strings, direct calls, field accesses and Java/Smali evidence. It batches selected targets, does not recursively explore relationships, and writes `research.json` without creating a matching run. Research can help author a rule; it is not a Resolution, and its evidence cannot be submitted as another run's Review. A partial Java rendering remains explicit while raw DEX reading failures abort the operation.
 
-Copy [the multi-round example](examples/multiround-rules.json) and replace its public marker/component strings with observed inputs. It defines a logger class anchor, a current-version factory METHOD anchor and a class target that uses that factory:
+Copy [the dependency example](examples/multiround-rules.json) and replace its public marker/component strings with observed inputs. It defines a logger class anchor, a current-version factory METHOD anchor and a class target that uses that factory:
 
 ```powershell
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\round-rules.json --corpus ..\private-research\dexlineage\manual-corpus\corpus.json --run ..\private-research\dexlineage\round-1
-& $cli analysis tasks --run ..\private-research\dexlineage\round-1 --state ALL
-& $cli analysis publish --run ..\private-research\dexlineage\round-1 --out ..\private-research\dexlineage\knowledge-round-1
-& $cli analysis prepare --apk 'D:\apks\current.apk' --rules ..\private-research\dexlineage\round-rules.json --corpus ..\private-research\dexlineage\manual-corpus\corpus.json --base-knowledge ..\private-research\dexlineage\knowledge-round-1\knowledge.json --run ..\private-research\dexlineage\round-2
-& $cli analysis publish --run ..\private-research\dexlineage\round-2 --out ..\private-research\dexlineage\knowledge-round-2
+& $cli analysis prepare --apk 'D:/apks/current.apk' --rules ../private-research/dexlineage/rules.json --corpus ../private-research/dexlineage/manual-corpus/corpus.json --run ../private-research/dexlineage/analysis-001
+& $cli analysis tasks --run ../private-research/dexlineage/analysis-001 --state ALL
+& $cli analysis inspect --run ../private-research/dexlineage/analysis-001 --out ../private-research/dexlineage/review-packet
 ```
 
-Continue with a new run and the latest base until the required class tasks are ready for `inspect / submit / publish`. This example needs another round before the class can use its newly published factory. `prepare` never consumes anchors created within that same execution. Missing resolved prerequisites are `WAITING_DEPENDENCY`, with no fabricated Resolution. `inspect --task 'anchor:logger-factory'` reads an anchor's code; ordinary task IDs read class candidates and their dependency evidence.
+The logger class, its factory METHOD and the dependent class resolve in this single prepare. Each effective rule is evaluated once. Missing, ambiguous or unknown prerequisites leave their dependants as `WAITING_DEPENDENCY`, with no fabricated NO_MATCH. Unrelated rules still execute. Inspect an `anchor:<key>` to read a prerequisite directly; ordinary tasks include their dependency evidence.
 
 The compile-time registry provides Messages-oriented logger, Handler-name and RPC/Proto strategies. They take configuration and structured APK facts, not hardcoded obfuscated answers. [The RPC example](examples/rpc-rules.json) demonstrates one descriptor METHOD anchor feeding request and response class targets. Real application tags, service lists and manual names belong in the external private workspace; the strategy code and self-authored fixtures are public.
 
-[RPC related-type rules](examples/rpc-related-rules.json) use the same verified METHOD anchor to locate the constructed descriptor, its builder, and the common marshaller declaration interface. Service, RPC and label settings come from the producer rule. The strategy reads the actual construction, including when the outer RPC method returns `Object`; it does not name the outer method's return type or the concrete marshaller implementation by assumption. Any unresolved competing construction keeps related-type results UNKNOWN even when the enclosing method is unique. This takes two rounds: publish the RPC method anchor, then match and review class targets.
+[RPC related-type rules](examples/rpc-related-rules.json) use the same verified METHOD anchor to locate the constructed descriptor, its builder, and the common marshaller declaration interface. Service, RPC and label settings come from the producer rule. The strategy reads the actual construction, including when the outer RPC method returns `Object`; it does not name the outer method's return type or the concrete marshaller implementation by assumption. Any unresolved competing construction keeps related-type results UNKNOWN even when the enclosing method is unique. One prepare resolves the RPC method and its related class targets; review and publication remain explicit.
 
 ## Continue Analysis on existing knowledge
 
@@ -202,15 +187,9 @@ Pass the published knowledge file and accompanying evidence directly to Migratio
 
 Migration only creates tasks for confirmed semantic targets in the source knowledge. It preserves their names and keeps unresolved knowledge with its last confirmed source. The default confidence threshold is HIGH; `prepare --min-confidence MEDIUM` freezes another threshold without relaxing uniqueness or identity checks.
 
-Source anchors supply rule definitions, not target-version bindings. Migration resolves them again on the target APK. After publishing one round, keep the original `--knowledge` and source/target APKs fixed and pass the prior target package through `--target-base`:
+Source anchors supply rule definitions, not target bindings. One Migration prepare resolves the prerequisites again in the target APK and evaluates the dependent targets. `--target-base` is optional continuation of already confirmed target results from the same source knowledge and target APK, not a dependency-stage input. New source revisions cannot borrow an earlier migration's target base.
 
-```powershell
-& $cli migration prepare --knowledge ..\private-research\dexlineage\knowledge-v1\knowledge.json --source-apk 'D:\apks\old.apk' --target-apk 'D:\apks\new.apk' --target-base ..\private-research\dexlineage\knowledge-v2-round-1\knowledge.json --run ..\private-research\dexlineage\migration-002
-```
-
-The target base must belong to that same source knowledge and target APK. It preserves earlier target confirmations while enabling later dependency rounds; it does not replace the frozen source target set.
-
-Extending source knowledge changes its knowledge ID. An earlier migration's target package cannot be used as the target base for that new source revision. A bounded experiment may publish an independent subset package and migrate it separately; this does not merge its results into the existing complete package. New strategy builds also change the implementation fingerprint, so freeze the build before reviewing fresh dependency rounds.
+Use `migration inspect --run ... --out ...` to obtain source/target evidence and a blank semantic-review template. Omitting `--task` includes all tasks; `--candidate` cannot be combined with packet output. Input, rule or implementation changes require fresh matching and current Review identities.
 
 Supply an [override file](examples/migration-overrides.json) with `migration prepare --rules ...` and a new run directory to revise rules. Each override replaces that target's entire active locator set; unlisted targets keep their rules. Unknown semantic IDs are rejected. A target-version rule need not match the source APK. Accepted migration publishes the rule revision actually used for the new binding.
 
@@ -229,7 +208,7 @@ Every publication uses a new directory containing:
 - `knowledge.json`: schema 4, class bindings, supporting anchors, active rules, dependency proofs, parent knowledge reference, review provenance and unresolved history.
 - `mapping.tiny`: class-only Tiny v2 `obfuscated` → `named` mappings.
 - `report.json`: task outcomes, active rules, diagnostics and published review revisions.
-- `evidence/`: required Java/Smali files with content hashes.
+- `evidence/` and `dependency-evidence/`: required review and symbol-proof Java/Smali with content hashes.
 
 Keep the package together. Matching proofs include their frozen dependencies; all referenced code is copied into the package, including historical proof evidence. Reproduce a same-run publication after later reviews:
 
@@ -262,7 +241,7 @@ Evidence completeness means verifiable files, identities, hashes and review refe
 
 The explicit `realCaseTest` task requires local case properties; normal builds exclude it. The real case uses existing APKs and Agent-authored reviews, tests fresh matching separately from publication replay, and checks invalid ambiguity, same-APK continuation, failed-update retention, legacy upgrade and Mapping readback. It does not fabricate semantic reviews or require historical success counts.
 
-For the v0.4 multi-round acceptance runner, use a local properties file:
+Historical saved-case verification can still read the earlier ordered-run manifests. These inputs validate retained runs/publications; they are not instructions for creating a new multi-round execution. Use a local properties file:
 
 ```properties
 scenario=v04

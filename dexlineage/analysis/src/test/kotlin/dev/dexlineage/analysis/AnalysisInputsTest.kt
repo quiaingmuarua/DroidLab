@@ -1,4 +1,4 @@
-package dev.dexlineage.analysis.workspace
+package dev.dexlineage.analysis
 
 import dev.dexlineage.analysis.*
 import dev.dexlineage.io.*
@@ -9,7 +9,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.*
 
-class CorpusWorkspaceTest {
+class AnalysisInputsTest {
     @TempDir lateinit var temp: Path
     private fun inputs(): Pair<Path, ManualCorpus> {
         val apk = Digests.artifact(Files.writeString(temp.resolve("identity.apk"), "identity only; never parsed"))
@@ -28,25 +28,25 @@ class CorpusWorkspaceTest {
         return config to corpus
     }
 
-    @Test fun `workspace freezes corpus and original annotations without executing an APK`() {
+    @Test fun `analysis inputs retain corpus and original annotations without executing an APK`() {
         val (config, corpus) = inputs()
-        val frozen = AnalysisWorkspaceActions.inputs("messages.proto-relations", config)
+        val frozen = OneShotAnalysis.inputs("messages.proto-relations", config)
         assertEquals(Digests.artifact(temp.resolve("corpus.json")), frozen.corpusFile)
         assertTrue(frozen.corpusFile in frozen.inputFiles)
         assertTrue(corpus.project in frozen.inputFiles)
-        assertEquals(2, frozen.method.seedSteps.size)
+        assertEquals(1, frozen.method.seedRules!!.anchors.size)
         Files.writeString(Path.of(corpus.project.path), "changed manual project")
         assertFailsWith<ValidationException> { frozen.inputFiles.forEach(Digests::verify) }
     }
 
-    @Test fun `missing or wrong APK corpus is rejected before creating workspace progress`() {
+    @Test fun `missing or wrong APK corpus is rejected before creating analysis output`() {
         val (config, _) = inputs()
         val json = com.google.gson.JsonParser.parseString(Files.readString(config)).asJsonObject
         json.remove("corpus"); Files.writeString(config, JsonFiles.encode(json))
-        assertFailsWith<ValidationException> { AnalysisWorkspaceActions.inputs("messages.proto-relations", config) }
+        assertFailsWith<ValidationException> { OneShotAnalysis.inputs("messages.proto-relations", config) }
         json.addProperty("corpus", "corpus.json"); json.addProperty("apk", "other.apk")
         Files.writeString(temp.resolve("other.apk"), "another identity"); Files.writeString(config, JsonFiles.encode(json))
-        assertFailsWith<ValidationException> { AnalysisWorkspaceActions.inputs("messages.proto-relations", config) }
-        assertFalse(Files.exists(temp.resolve("workspace")))
+        assertFailsWith<ValidationException> { OneShotAnalysis.inputs("messages.proto-relations", config) }
+        assertFalse(Files.exists(temp.resolve("output")))
     }
 }

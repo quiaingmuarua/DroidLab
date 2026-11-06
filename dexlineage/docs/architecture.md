@@ -4,13 +4,13 @@
 
 | Module | Owns | Project dependencies |
 |---|---|---|
-| `analysis` | Manual corpus, discovery, current-APK targets, dependency rounds, naming review and publication | `knowledge`, `jadx` |
+| `analysis` | Manual corpus, discovery, current-APK targets, symbol dependencies, naming review and publication | `knowledge`, `jadx` |
 | `migration` | Fixed-target continuity, rule overrides, unresolved carry-forward and publication | `knowledge`, `jadx` |
 | `knowledge` | Version data, original CLASS/METHOD identities, rules, anchors, dependency proofs, evidence and review journal | None |
 | `jadx` | Raw DEX facts, compiled strategy registry, application recipes, code rendering, Tiny and Mapping readback | `knowledge` |
 | `cli` | Scene commands, distribution and explicit integration checks | `analysis`, `migration`, `jadx` |
 
-The scenes do not call each other. `VersionKnowledge` is their handoff. Each scene owns its tasks, run fingerprint, review meaning and publication decisions. Analysis has a finite stage coordinator for compiled analysis methods; it does not implement an Agent runtime, general graph scheduler or a second publication service.
+The scenes do not call each other. `VersionKnowledge` is their handoff. Each scene owns its tasks, run fingerprint, review meaning and publication decisions. Analysis methods run prerequisite discovery and target matching once. There is no Agent loop, stage recovery coordinator, graph scheduler or second publication service.
 
 ## Mechanism and analysis methods
 
@@ -18,19 +18,19 @@ The scenes do not call each other. `VersionKnowledge` is their handoff. Each sce
 
 Reusable matching capabilities bind actual objects and relationships and preserve uncertainty; they are not one-to-one wrappers around JADX getters. The Messages implementation owns its logger/Handler/RPC conventions, including the strategies historically named `grpc-java.*`. Those IDs remain stable for saved rules and do not claim cross-application coverage. A matching handler cannot submit Review or write Mapping.
 
-`AnalysisMethod` owns the analysis-side configuration, finite seed steps, discovery-to-draft transformation, grouping, task explanation and scenario reports. `messages.grpc` supplies the RPC topic analysis, `messages.proto-relations` supplies fixed one-hop field targets, and `profile` supplies the generic discovery/template flow. Analysis owns input freezing, execution, review and publication. Migration continues using the same matching handlers through its existing knowledge-driven lifecycle.
+`AnalysisMethod` owns the analysis-side configuration, prerequisite rule definitions, discovery-to-draft transformation, grouping, task explanation and scenario reports. `messages.grpc` supplies the RPC topic analysis, `messages.proto-relations` supplies fixed one-hop field targets, and `profile` supplies the generic discovery/template flow. Analysis owns input freezing, execution, review and publication. Migration continues using the same matching handlers through its existing knowledge-driven lifecycle.
 
 Scenario observations have concrete DTOs and codecs owned by their scenario. The shared runtime freezes artifact kind/path/digest references without interpreting service/RPC/role. Historical schema-4 RPC fields are read and written only through compatibility codecs so existing hashes and saved publication replay retain their original wire layout. New optional fields are omitted when absent; old files are never normalized in place before their identities are checked.
 
-## Recoverable Analysis workspace
+## Single analysis execution
 
-`analysis run --method ... --config ... --work ...` freezes inputs and implementation and executes the method's seed steps, discovery, prepare and review-packet stages. `analysis status` is read-only. `analysis resume` verifies and advances the same execution. The Messages method declares three immutable seed rounds; the generic profile method has none. A new anchor can only be consumed through the next published snapshot.
+`analysis run --method ... --config ... --work ...` interprets the method configuration, resolves prerequisite symbols, discovers targets, matches them and emits one run plus a review packet. `prepare` directly executes supplied target rules and their dependencies. Both use the same engine semantics. Review and publication remain explicit operations.
 
-The workspace is a single-writer coordinator with a process file lock. Existing run files, Review transactions and knowledge packages remain the authorities for matching and decisions. Stage receipts reference the full formal output set and its digests. Attempts keep stable paths; a partial attempt is retained, and explicit resume uses a new attempt. Complete orphan outputs may be adopted only after normal operation-specific validation. A lone `discovery.json` or `knowledge.json` cannot establish completion without rules/catalogue or Mapping/report/evidence respectively.
+The execution context owns a current-APK fact session and a memoized result per effective rule and dependency binding. Only UNIQUE symbols become inputs to dependants. Failed prerequisites block their dependants without preventing unrelated matching. Configuration cycles and missing definitions fail before execution.
 
-The selected review scope is frozen. Unreviewed executable tasks block at `WAITING_REVIEW`; invalid, inherited, rejected and deferred targets do not require artificial acceptance. Unreviewed tasks outside the scope do not block publication. Explicit resume after Review freezes transaction heads and uses the existing snapshot publication path. A completed workspace resumes idempotently and does not automatically publish later Review revisions. Changed inputs or implementation require a fresh workspace.
+Dependency evidence is identified from APK/rule/implementation and code content without the final runId. A complete SupportAnchor is constructed before downstream Resolution IDs; publication uses that same canonical anchor object. Review evidence remains bound to the final run. New runs use `dependencyEvaluation: "in-run"`; absent markers retain the legacy frozen-base validation semantics and unchanged fingerprints. Knowledge schema 4 stays unchanged.
 
-`inspect --out` writes `review-packet.json`, `summary.md` and `review-template.json`. Task/proof identities, canonical-name provenance and evidence requirements are program-derived. Shared code evidence is referenced once with hashes and incomplete-rendering diagnostics. The template contains no acceptance judgment; copy it and provide actual semantics before submission. Review packet generation does not change candidates or publication policy.
+Interrupted work is rerun in a new directory. `analysis status/resume` only provide migration guidance; workspace locks, receipts and stage adoption are retired. Existing Review journal and publish-at behavior remain unchanged.
 
 ## Matching and rules
 
@@ -88,15 +88,15 @@ The registry dispatches registered Kotlin handlers. Each handler validates its o
 | `messages.proto-fields` | CLASS facts plus one-hop catalogue | `parent`: CLASS | No parameters; reads the supported parent metadata layout |
 | `messages.proto-field-type` | CLASS | `parent`: CLASS | `fieldNumber`, `cardinality`: singular or repeated |
 
-`requires` maps a local role to an anchor key, for example `{"factory":"logger-factory"}`. A key is a lookup into the frozen current-APK knowledge, not a displayed name or an old obfuscated descriptor. A resolved dependency can legitimately constrain a search to all implementations of its interface or all uses of its factory; it cannot constrain the search to a desired answer list.
+`requires` maps a local role to an anchor key, for example `{"factory":"logger-factory"}`. A key is a lookup into the current-execution symbols or validated same-APK base knowledge, not a displayed name or an old obfuscated descriptor. A resolved dependency can legitimately constrain a search to all implementations of its interface or all uses of its factory; it cannot constrain the search to a desired answer list.
 
 Unknown strategies/parameters, absent dependency definitions, producer-kind mismatches and cycles are input errors. A defined prerequisite that is not yet uniquely resolved produces `WAITING_DEPENDENCY` with no Resolution. Each successful Resolution freezes the actual dependency objects and their proofs, so substituting another revision changes its identity.
 
-Multi-round execution is explicit: prepare → publish → new prepare with a base package. New anchors are not consumed inside the prepare that produced them. UNIQUE anchors publish without Review; final class names require owner and dependency-chain evidence. Unchanged confirmed entries and anchors can be inherited. A changed rule, implementation or upstream proof requires a new execution; the previous publication remains immutable.
+Dependency evaluation is local to one prepare: prerequisites are uniquely resolved before their dependants execute. No intermediate publication is required. UNIQUE anchors have no Rename authority; class names still require owner and dependency-chain Review. A valid same-APK base can preserve confirmed results. Changed rules, implementation or dependencies require fresh matching; prior publications stay immutable.
 
 Messages-specific strategies identify the logging-name role rather than assuming every no-argument String method has that role. RPC strategies bind service, RPC, builder and request/response roles in one construction, supporting the observed static marshaller factory and constructor forms. Unsupported flow remains UNKNOWN. Source/target symbol names, input corpora and test oracle identities do not choose candidates.
 
-The Proto strategy interprets a bounded Lite metadata format inside Messages code. `CallSlices` only supplies path-specific call/return and array-lifetime facts, including switch targets and uncertainty; existing `RawTrace.read` behavior remains unchanged. The strategy verifies inherited factories, parent default instances, complete metadata cursors and original field types before selecting a child. Workspace corpus passthrough and opaque Migration artifact storage do not interpret Proto fields. See [one-hop Proto analysis](messages-proto-relations.md) for supported layouts and the finite workflow.
+The Proto strategy interprets a bounded Lite metadata format inside Messages code. `CallSlices` only supplies path-specific call/return and array-lifetime facts, including switch targets and uncertainty; existing `RawTrace.read` behavior remains unchanged. The strategy verifies inherited factories, parent default instances, complete metadata cursors and original field types before selecting a child. Analysis corpus input and opaque Migration artifact storage do not interpret Proto fields. See [one-hop Proto analysis](messages-proto-relations.md) for supported layouts and the finite workflow.
 
 RPC related types retain typed construction facts: descriptor allocation, builder method owner, both role-field declaration types and actual marshaller implementation types. The `marshaller` role requires one common declaration interface with compatible implementations. An outer RPC method returning `Object` does not identify its descriptor type. Multiple constructions are considered together: different complete role types remain ambiguous, and any unresolved construction downgrades all known related-role candidates to UNKNOWN before normal class deduplication can prefer PASS. A dependency whose complete construction cannot be reproduced fails execution rather than manufacturing NO_MATCH. Related-type rules inherit service/RPC/label configuration from the verified producer, and cannot override it independently.
 
@@ -143,7 +143,7 @@ A discovery profile has `schemaVersion: 4`, `id` and either `discovery` (an exis
 }
 ```
 
-An item may supply `semanticId` to update an existing same-APK entry, `corpusTargetId` to link a manual target, or `strategy` instead of `locators`. Top-level `anchors` declare support rules by `key`; these may return CLASS or METHOD. Rename items must return CLASS. See the [multi-round example](../examples/multiround-rules.json) and [RPC example](../examples/rpc-rules.json). A discovery-generated file also contains `discovery: {path, sha256}` and `discoveryKey` per linked item. The frozen discovery provides its original owner; after unrestricted rule execution, the unique result must agree with that owner. No handwritten expected target is accepted. New rules can also be authored directly without discovery.
+An item may supply `semanticId` to update an existing same-APK entry, `corpusTargetId` to link a manual target, or `strategy` instead of `locators`. Top-level `anchors` declare support rules by `key`; these may return CLASS or METHOD. Rename items must return CLASS. See the [dependency example](../examples/multiround-rules.json) and [RPC example](../examples/rpc-rules.json). A discovery-generated file also contains `discovery: {path, sha256}` and `discoveryKey` per linked item. The frozen discovery provides its original owner; after unrestricted rule execution, the unique result must agree with that owner. No handwritten expected target is accepted. New rules can also be authored directly without discovery.
 
 With `--base-knowledge`, Analysis freezes a same-APK knowledge revision. It reuses IDs by original current binding, publishes accepted updates plus unchanged base entries, and retains historical unresolved items. Failed attempts remain visible in run/report without replacing valid base names, bindings or rules. Explicit same-APK pending targets may be retried. Cross-APK pending targets are carried, not silently claimed by name. Moving an existing semantic ID to another entity in the same APK is outside this version.
 

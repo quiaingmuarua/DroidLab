@@ -26,7 +26,8 @@ data class AnalysisDiscovery(val schemaVersion: Int = SCHEMA_VERSION, val kind: 
     val analysisMillis: Long, val createdAt: String,
     val baseFile: Artifact? = null, val baseKnowledge: VersionKnowledge? = null,
     val unresolvedPaths: List<UnresolvedPath>? = null,
-    val methodArtifacts: List<ScenarioArtifactRef>? = null, @Transient val compatibility: JsonObject? = null) {
+    val methodArtifacts: List<ScenarioArtifactRef>? = null, val resolvedAnchors: Map<String, SupportAnchor>? = null,
+    val waitingFor: List<String>? = null, @Transient val compatibility: JsonObject? = null) {
     fun fingerprint(): String = Digests.text(JsonFiles.encode(copy(discoveryId = "", createdAt = "",
         scan = scan.copy(elapsedMillis = 0), analysisMillis = 0)))
 }
@@ -61,6 +62,8 @@ data class AnalysisRun(val schemaVersion: Int = SCHEMA_VERSION, val kind: String
     val analysisDiagnostics: List<String>, val analysisMillis: Long, val createdAt: String,
     val anchorTasks: List<AnalysisAnchorTask> = emptyList(), val corpusFile: Artifact? = null, val corpus: ManualCorpus? = null,
     val identityReferences: List<IdentityReference>? = null, val methodArtifacts: List<ScenarioArtifactRef>? = null,
+    val dependencyEvaluation: String? = null, val resolvedAnchors: Map<String, SupportAnchor>? = null,
+    val evaluatedRules: List<String>? = null,
     @Transient val compatibility: JsonObject? = null) {
     fun fingerprint(): String = Digests.text(JsonFiles.encode(copy(runId = "", createdAt = "", scan = scan.copy(elapsedMillis = 0),
         analysisMillis = 0, discovery = discovery?.copy(createdAt = "", scan = discovery.scan.copy(elapsedMillis = 0), analysisMillis = 0))))

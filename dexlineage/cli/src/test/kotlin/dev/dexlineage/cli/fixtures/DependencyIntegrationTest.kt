@@ -13,7 +13,7 @@ import kotlin.test.*
 
 /** Real subprocess regression. Semantic truth is declared here before any candidate is read. */
 @Tag("fixture-integration")
-class MultiRoundIntegrationTest {
+class DependencyIntegrationTest {
     private val namespace = "dev.dexlineage.fixture.rounds."
     private val names = linkedMapOf("LoggerBusiness" to "ReviewedRoundCache", "NamedHandler" to "RoundHandler",
         "RequestRecord" to "ReadRecordRequest", "ResponseRecord" to "ReadRecordResponse")
@@ -30,11 +30,11 @@ class MultiRoundIntegrationTest {
     private fun strategy(id: String, params: JsonObject = JsonObject(), kind: EntityKind = EntityKind.CLASS,
         vararg dependencies: Pair<String, String>) = StrategySpec(id, params, kind, dependencies.toMap())
 
-    @Test fun `compiled strategies use current anchors across immutable CLI rounds`() {
+    @Test fun `compiled strategies resolve current symbols within one CLI prepare`() {
         workspace = Path.of(System.getProperty("dexlineage.fixtureRoot")).toAbsolutePath().parent.parent
         manifest = FixtureManifest.read(Path.of(System.getProperty("dexlineage.fixtureCases")))
         cli = FixtureCli(Path.of(System.getProperty("dexlineage.distributionDir")),
-            Path.of(System.getProperty("dexlineage.fixtureResults")).resolve("rounds-${UUID.randomUUID()}"), workspace)
+            Path.of(System.getProperty("dexlineage.fixtureResults")).resolve("dependencies-${UUID.randomUUID()}"), workspace)
         oracle = manifest.versions.mapValues { (_, value) -> R8Oracle(workspace.resolve(value.mapping)) }
         names.keys.forEach { assertNotEquals(descriptor("v1", it), descriptor("v2", it)) }
 
@@ -95,54 +95,37 @@ class MultiRoundIntegrationTest {
             AnalysisRuleItem("split", proposedName = "NeverSpliced", strategy = strategy("messages.rpc-message", parameters("service" to "fixture.Split", "rpc" to "ReadRecord", "role" to "request"), EntityKind.CLASS, "descriptor" to "split-rpc")),
             AnalysisRuleItem("swapped", proposedName = "NeverAssumeRequest", strategy = strategy("messages.rpc-message", parameters("service" to "fixture.Swapped", "rpc" to "ReadRecord", "role" to "request"), EntityKind.CLASS, "descriptor" to "swapped-rpc")))
         val rules = cli.write("inputs/rules.json", AnalysisRuleFile(items = items, anchors = anchors))
-        var base: Path? = null
-        var lastRun: AnalysisRun? = null
-        var lastDir: Path? = null
-        for (round in 1..3) {
-            val dir = cli.output.resolve("source-round-$round")
-            val args = mutableListOf<Any>("analysis", "prepare", "--apk", apk("v1"), "--rules", rules, "--corpus", corpusPath, "--run", dir)
-            base?.let { args.addAll(listOf("--base-knowledge", it.resolve("knowledge.json"))) }
-            cli.execute("source-$round-prepare", *args.toTypedArray())
-            val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
-            if (round == 1) {
-                assertTrue(run.tasks.all { it.resolution == null && it.waitingFor.isNotEmpty() })
-                assertNull(run.anchorTasks.single { it.key == "factory" }.resolution, "No same-command propagation")
-                assertMethod(run.anchorTasks.single { it.key == "rpc" }.resolution!!, "v1", "RpcDescriptors", "read", "()${sourceType("Descriptor")}")
-            }
-            if (round >= 2) {
-                assertMethod(run.anchorTasks.single { it.key == "factory" }.resolution ?: run.baseKnowledge!!.anchors.single { it.key == "factory" }.resolution, "v1", "RoundLogger", "create", "(Ljava/lang/String;Ljava/lang/String;)${sourceType("RoundLogger")}")
-                val ambiguous = run.anchorTasks.single { it.key == "ambiguous-factory" }.resolution!!
-                assertEquals(ResolutionStatus.AMBIGUOUS, ambiguous.status)
-                assertEquals(2, ambiguous.candidates.size)
-                assertEquals(1, ambiguous.candidates.map { it.ref }.distinct().size)
-                assertMethod(run.anchorTasks.single { it.key == "name-method" }.resolution ?: run.baseKnowledge!!.anchors.single { it.key == "name-method" }.resolution, "v1", "HandlerContract", "componentName", "()Ljava/lang/String;")
-            }
-            val reviews = mutableListOf<AnalysisReview>()
-            for (task in run.tasks.filter { it.taskId in names && it.executionState == AnalysisExecutionState.EXECUTED }) {
-                assertClass(task.resolution!!, "v1", task.taskId)
-                val evidence = inspect("analysis", dir, task.taskId)
-                reviews += AnalysisReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT,
-                    names.getValue(task.taskId), Confidence.HIGH, "Fixture-authored ${task.taskId} role confirmed against independent source/R8 oracle.",
-                    listOf("Static protocol regression; no runtime behavior claim."), evidence.map { it.evidenceId })
-            }
-            if (reviews.isNotEmpty()) {
-                val file = cli.write("reviews/source-$round.json", AnalysisReviewBatch(runId = run.runId, apkSha256 = run.apk.sha256, items = reviews))
-                cli.execute("source-$round-submit", "analysis", "submit", "--run", dir, "--review", file)
-                cli.execute("source-$round-retry", "analysis", "submit", "--run", dir, "--review", file)
-            }
-            val out = cli.output.resolve("source-published-$round")
-            cli.execute("source-$round-publish", "analysis", "publish", "--run", dir, "--out", out)
-            verifyRoundPublished(out, "v1", round)
-            if (round == 1) assertTrue(cli.read<VersionKnowledge>(out.resolve("knowledge.json")).entries.isEmpty())
-            base = out; lastRun = run; lastDir = dir
+        val lastDir = cli.output.resolve("source-run")
+        cli.execute("source-prepare", "analysis", "prepare", "--apk", apk("v1"), "--rules", rules,
+            "--corpus", corpusPath, "--run", lastDir)
+        val lastRun = cli.read<AnalysisRun>(lastDir.resolve("run.json"))
+        assertEquals("in-run", lastRun.dependencyEvaluation)
+        assertMethod(lastRun.anchorTasks.single { it.key == "rpc" }.resolution!!, "v1", "RpcDescriptors", "read", "()${sourceType("Descriptor")}")
+        assertMethod(lastRun.anchorTasks.single { it.key == "factory" }.resolution!!, "v1", "RoundLogger", "create", "(Ljava/lang/String;Ljava/lang/String;)${sourceType("RoundLogger")}")
+        val ambiguous = lastRun.anchorTasks.single { it.key == "ambiguous-factory" }.resolution!!
+        assertEquals(ResolutionStatus.AMBIGUOUS, ambiguous.status)
+        assertEquals(2, ambiguous.candidates.size)
+        assertEquals(1, ambiguous.candidates.map { it.ref }.distinct().size)
+        assertMethod(lastRun.anchorTasks.single { it.key == "name-method" }.resolution!!, "v1", "HandlerContract", "componentName", "()Ljava/lang/String;")
+        val sourceReviews = lastRun.tasks.filter { it.taskId in names }.map { task ->
+            assertClass(task.resolution!!, "v1", task.taskId)
+            val evidence = inspect("analysis", lastDir, task.taskId)
+            AnalysisReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT,
+                names.getValue(task.taskId), Confidence.HIGH, "Fixture-authored ${task.taskId} role confirmed against independent source/R8 oracle.",
+                listOf("Static protocol regression; no runtime behavior claim."), evidence.map { it.evidenceId })
         }
-        val sourceOut = base!!
+        val sourceReviewFile = cli.write("reviews/source.json", AnalysisReviewBatch(runId = lastRun.runId, apkSha256 = lastRun.apk.sha256, items = sourceReviews))
+        cli.execute("source-submit", "analysis", "submit", "--run", lastDir, "--review", sourceReviewFile)
+        cli.execute("source-idempotent-submit", "analysis", "submit", "--run", lastDir, "--review", sourceReviewFile)
+        val sourceOut = cli.output.resolve("source-published")
+        cli.execute("source-publish", "analysis", "publish", "--run", lastDir, "--out", sourceOut)
+        verifyPublished(sourceOut, "v1")
         val source = cli.read<VersionKnowledge>(sourceOut.resolve("knowledge.json"))
         assertEquals(names.keys.map { descriptor("v1", it) }.toSet(), source.entries.map { it.binding.descriptor }.toSet())
-        val ledger = cli.result<CorpusTargetPage>("final-targets", "analysis", "targets", "--corpus", corpusPath, "--run", lastDir!!, "--limit", 100)
+        val ledger = cli.result<CorpusTargetPage>("final-targets", "analysis", "targets", "--corpus", corpusPath, "--run", lastDir, "--limit", 100)
         assertEquals(5, ledger.total)
         assertEquals("UNCONFIGURED", ledger.items.single { it.target.manualName == "UnconfiguredTarget" }.state)
-        assertEquals(ResolutionStatus.AMBIGUOUS, lastRun!!.tasks.single { it.taskId == "duplicate" }.resolution!!.status)
+        assertEquals(ResolutionStatus.AMBIGUOUS, lastRun.tasks.single { it.taskId == "duplicate" }.resolution!!.status)
         assertEquals(ResolutionStatus.UNKNOWN, lastRun.tasks.single { it.taskId == "unknown" }.resolution!!.status)
         assertNull(lastRun.tasks.single { it.taskId == "blocked" }.resolution)
         assertNotEquals(ResolutionStatus.UNIQUE, lastRun.tasks.single { it.taskId == "split" }.resolution?.status)
@@ -151,7 +134,7 @@ class MultiRoundIntegrationTest {
         val replay = cli.output.resolve("source-replay")
         cli.execute("source-replay", "analysis", "publish", "--run", lastDir, "--out", replay, "--at", sourceOut.resolve("report.json"))
         assertEquals(Files.readString(sourceOut.resolve("knowledge.json")), Files.readString(replay.resolve("knowledge.json")))
-        verifyRoundPublished(replay, "v1", 3)
+        verifyPublished(replay, "v1")
         PublishedFixtureAssertions.negativeCopies(cli, apk("v1"), sourceOut.resolve("knowledge.json"), oracle.getValue("v1"),
             entryTruth(), anchorTruth("v1"), namespace + "UnconfiguredTarget")
 
@@ -165,14 +148,14 @@ class MultiRoundIntegrationTest {
         val waitingCache = changed.tasks.single { it.taskId == "LoggerBusiness" }
         assertEquals(AnalysisExecutionState.WAITING_DEPENDENCY, waitingCache.executionState)
         assertNull(waitingCache.resolution)
-        val oldReview = cli.read<AnalysisReviewBatch>(cli.output.resolve("reviews/source-3.json")).items.single { it.taskId == "LoggerBusiness" }
+        val oldReview = cli.read<AnalysisReviewBatch>(cli.output.resolve("reviews/source.json")).items.single { it.taskId == "LoggerBusiness" }
         val stale = cli.write("reviews/stale-dependency.json", AnalysisReviewBatch(runId = changed.runId, apkSha256 = changed.apk.sha256, items = listOf(oldReview)))
         cli.execute("stale-dependency-review-rejected", "analysis", "submit", "--run", changedDir, "--review", stale, expectedExit = 2)
         val retained = cli.output.resolve("dependency-change-retained")
         cli.execute("dependency-change-retained", "analysis", "publish", "--run", changedDir, "--out", retained)
         assertEquals(source.entries, cli.read<VersionKnowledge>(retained.resolve("knowledge.json")).entries)
         assertEquals(Files.readString(sourceOut.resolve("mapping.tiny")), Files.readString(retained.resolve("mapping.tiny")))
-        verifyRoundPublished(retained, "v1", 3)
+        verifyPublished(retained, "v1")
         cli.execute("wrong-apk-dependencies", "analysis", "prepare", "--apk", apk("v2"), "--rules", rules,
             "--base-knowledge", sourceOut.resolve("knowledge.json"), "--run", cli.output.resolve("wrong-apk"), expectedExit = 2)
         cli.execute("source-is-not-target-base", "migration", "prepare", "--knowledge", sourceOut.resolve("knowledge.json"),
@@ -191,65 +174,59 @@ class MultiRoundIntegrationTest {
         cli.execute("changed-ancestor-evidence", "analysis", "prepare", "--apk", apk("v1"), "--rules", rules,
             "--base-knowledge", broken.resolve("knowledge.json"), "--run", cli.output.resolve("bad-ancestor-run"), expectedExit = 2)
 
-        base = null
-        for (round in 1..3) {
-            val dir = cli.output.resolve("target-round-$round")
-            val args = mutableListOf<Any>("migration", "prepare", "--knowledge", sourceOut.resolve("knowledge.json"),
-                "--source-apk", apk("v1"), "--target-apk", apk("v2"), "--run", dir)
-            base?.let { args.addAll(listOf("--target-base", it.resolve("knowledge.json"))) }
-            cli.execute("target-$round-prepare", *args.toTypedArray())
-            val run = cli.read<MigrationRun>(dir.resolve("run.json"))
-            assertEquals(source.entries.map { it.semanticId }.toSet(), run.tasks.map { it.taskId }.toSet())
-            run.tasks.forEach { task ->
-                assertEquals(task.entry.ruleRevision, task.rule, "Migration must preserve the exact source rule")
-                task.resolution?.let { proof ->
-                    assertEquals(RawDex.read(apk("v2")).apkSha256, proof.apkSha256)
-                    assertNotEquals(task.entry.resolution!!.resolutionId, proof.resolutionId)
-                    assertNotEquals(task.entry.binding.apkSha256, proof.apkSha256)
-                }
+        val targetDir = cli.output.resolve("target-run")
+        cli.execute("target-prepare", "migration", "prepare", "--knowledge", sourceOut.resolve("knowledge.json"),
+            "--source-apk", apk("v1"), "--target-apk", apk("v2"), "--run", targetDir)
+        val run = cli.read<MigrationRun>(targetDir.resolve("run.json"))
+        val dir = targetDir
+        assertEquals("in-run", run.dependencyEvaluation)
+        assertEquals(source.entries.map { it.semanticId }.toSet(), run.tasks.map { it.taskId }.toSet())
+        run.tasks.forEach { task ->
+            assertEquals(task.entry.ruleRevision, task.rule, "Migration must preserve the exact source rule")
+            task.resolution?.let { proof ->
+                assertEquals(RawDex.read(apk("v2")).apkSha256, proof.apkSha256)
+                assertNotEquals(task.entry.resolution!!.resolutionId, proof.resolutionId)
+                assertNotEquals(task.entry.binding.apkSha256, proof.apkSha256)
             }
-            run.anchorTasks.forEach { task ->
-                val old = source.anchors.single { it.key == task.key }
-                assertEquals(old.rule, task.rule, "Anchor strategy/parameters/dependencies must remain unchanged")
-                task.resolution?.let { proof ->
-                    assertEquals(RawDex.read(apk("v2")).apkSha256, proof.apkSha256)
-                    assertNotEquals(old.resolution.resolutionId, proof.resolutionId)
-                }
-            }
-            cli.write("proof-handoff/target-round-$round.json", mapOf("schemaVersion" to 1, "runId" to run.runId,
-                "sourceKnowledgeId" to source.knowledgeId, "targetApkSha256" to run.targetApk.sha256,
-                "tasks" to run.tasks.map { task -> mapOf("semanticId" to task.taskId,
-                    "ruleRevisionId" to task.rule.revisionId, "sourceResolutionId" to task.entry.resolution!!.resolutionId,
-                    "targetResolutionId" to task.resolution?.resolutionId, "unchangedRuleAsserted" to true,
-                    "executionState" to task.executionState) },
-                "anchors" to run.anchorTasks.map { task -> mapOf("key" to task.key,
-                    "ruleRevisionId" to task.rule.revisionId, "targetResolutionId" to task.resolution?.resolutionId,
-                    "unchangedRuleAsserted" to true) }, "status" to "PASS"))
-            if (round == 1) {
-                assertTrue(run.tasks.all { it.resolution == null }, "Source anchors must not satisfy target dependencies")
-                assertMethod(run.anchorTasks.single { it.key == "rpc" }.resolution!!, "v2", "RpcStub", "read", "()${sourceType("Descriptor")}")
-            }
-            if (round >= 2) assertMethod(run.anchorTasks.single { it.key == "factory" }.resolution ?: run.targetBase!!.anchors.single { it.key == "factory" }.resolution, "v2", "RoundLogger", "construct", "(Ljava/lang/String;Ljava/lang/String;)${sourceType("RoundLogger")}")
-            val reviews = run.tasks.filter { it.executionState == MigrationExecutionState.EXECUTED }.map { task ->
-                val type = names.entries.single { it.value == task.entry.name }.key
-                assertClass(task.resolution!!, "v2", type)
-                val evidence = inspect("migration", dir, task.taskId)
-                MigrationReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT, Confidence.HIGH, true,
-                    "Independent fixture source preserves the $type role across versions.",
-                    listOf("R8 symbols, factory method, constructor parameter order and descriptor owner change."),
-                    listOf("Fixture truth only; no Agent quality or runtime behavior claim."), evidence.map { it.evidenceId })
-            }
-            if (reviews.isNotEmpty()) {
-                val file = cli.write("reviews/target-$round.json", MigrationReviewBatch(runId = run.runId, sourceKnowledgeId = source.knowledgeId,
-                    sourceApkSha256 = run.sourceApk.sha256, targetApkSha256 = run.targetApk.sha256, items = reviews))
-                cli.execute("target-$round-submit", "migration", "submit", "--run", dir, "--review", file)
-            }
-            val out = cli.output.resolve("target-published-$round")
-            cli.execute("target-$round-publish", "migration", "publish", "--run", dir, "--out", out)
-            verifyRoundPublished(out, "v2", round)
-            base = out
         }
-        val target = cli.read<VersionKnowledge>(base!!.resolve("knowledge.json"))
+        run.anchorTasks.forEach { task ->
+            val old = source.anchors.single { it.key == task.key }
+            assertEquals(old.rule, task.rule, "Anchor strategy/parameters/dependencies must remain unchanged")
+            task.resolution?.let { proof ->
+                assertEquals(RawDex.read(apk("v2")).apkSha256, proof.apkSha256)
+                assertNotEquals(old.resolution.resolutionId, proof.resolutionId)
+            }
+        }
+        cli.write("proof-handoff/target.json", mapOf("schemaVersion" to 1, "runId" to run.runId,
+            "sourceKnowledgeId" to source.knowledgeId, "targetApkSha256" to run.targetApk.sha256,
+            "tasks" to run.tasks.map { task -> mapOf("semanticId" to task.taskId,
+                "ruleRevisionId" to task.rule.revisionId, "sourceResolutionId" to task.entry.resolution!!.resolutionId,
+                "targetResolutionId" to task.resolution?.resolutionId, "unchangedRuleAsserted" to true,
+                "executionState" to task.executionState) },
+            "anchors" to run.anchorTasks.map { task -> mapOf("key" to task.key,
+                "ruleRevisionId" to task.rule.revisionId, "targetResolutionId" to task.resolution?.resolutionId,
+                "unchangedRuleAsserted" to true) }, "status" to "PASS"))
+        assertTrue(run.tasks.all { it.resolution != null }, "Current target anchors must resolve in this prepare")
+        assertMethod(run.anchorTasks.single { it.key == "rpc" }.resolution!!, "v2", "RpcStub", "read", "()${sourceType("Descriptor")}")
+        assertMethod(run.anchorTasks.single { it.key == "factory" }.resolution!!, "v2", "RoundLogger", "construct", "(Ljava/lang/String;Ljava/lang/String;)${sourceType("RoundLogger")}")
+        val reviews = run.tasks.filter { it.executionState == MigrationExecutionState.EXECUTED }.map { task ->
+            val type = names.entries.single { it.value == task.entry.name }.key
+            assertClass(task.resolution!!, "v2", type)
+            val evidence = inspect("migration", dir, task.taskId)
+            MigrationReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT, Confidence.HIGH, true,
+                "Independent fixture source preserves the $type role across versions.",
+                listOf("R8 symbols, factory method, constructor parameter order and descriptor owner change."),
+                listOf("Fixture truth only; no Agent quality or runtime behavior claim."), evidence.map { it.evidenceId })
+        }
+        if (reviews.isNotEmpty()) {
+            val file = cli.write("reviews/target.json", MigrationReviewBatch(runId = run.runId, sourceKnowledgeId = source.knowledgeId,
+                sourceApkSha256 = run.sourceApk.sha256, targetApkSha256 = run.targetApk.sha256, items = reviews))
+            cli.execute("target-submit", "migration", "submit", "--run", dir, "--review", file)
+        }
+        val base = cli.output.resolve("target-published")
+        cli.execute("target-publish", "migration", "publish", "--run", targetDir, "--out", base)
+        verifyPublished(base, "v2")
+        val target = cli.read<VersionKnowledge>(base.resolve("knowledge.json"))
         assertEquals(names.values.toSet(), target.entries.map { it.name }.toSet())
         assertEquals(source.entries.map { it.semanticId }.toSet(), target.entries.map { it.semanticId }.toSet())
         assertTrue(target.unresolved.isEmpty())
@@ -261,13 +238,13 @@ class MultiRoundIntegrationTest {
         }
         verify(base, "v2", target)
         val targetReplay = cli.output.resolve("target-replay")
-        cli.execute("target-replay", "migration", "publish", "--run", cli.output.resolve("target-round-3"), "--out", targetReplay,
+        cli.execute("target-replay", "migration", "publish", "--run", targetDir, "--out", targetReplay,
             "--at", base.resolve("report.json"))
         for (file in listOf("knowledge.json", "mapping.tiny")) assertEquals(Files.readString(base.resolve(file)), Files.readString(targetReplay.resolve(file)))
-        verifyRoundPublished(targetReplay, "v2", 3)
+        verifyPublished(targetReplay, "v2")
         verifyUnsupportedCompetitors()
         cli.write("summary.json", mapOf("schemaVersion" to 4, "sourceClasses" to source.entries.size, "targetClasses" to target.entries.size,
-            "anchors" to target.anchors.size, "roundsPerVersion" to 3, "commands" to cli.commandCount,
+            "anchors" to target.anchors.size, "preparesPerVersion" to 1, "commands" to cli.commandCount,
             "commandTimings" to cli.timingSummary, "publishedDexReports" to "dex-consumption"))
     }
 
@@ -280,28 +257,22 @@ class MultiRoundIntegrationTest {
                 parameters("service" to "fixture.$kind", "rpc" to "ReadRecord"), EntityKind.METHOD)) }
         val rules = cli.write("inputs/unsupported-relations.json", AnalysisRuleFile(anchors = anchors))
         for (version in listOf("v1", "v2")) {
-            var base: Path? = null
-            for (round in 1..2) {
-                val dir = cli.output.resolve("unsupported-$version-$round")
-                val args = mutableListOf<Any>("analysis", "prepare", "--apk", apk(version), "--rules", rules, "--run", dir)
-                base?.let { args.addAll(listOf("--base-knowledge", it.resolve("knowledge.json"))) }
-                cli.execute("unsupported-$version-$round", *args.toTypedArray())
-                val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
-                for (key in listOf("setter", "helper", "mixed")) assertEquals(ResolutionStatus.UNKNOWN,
-                    run.anchorTasks.single { it.key == key }.resolution!!.status, "$version unsupported $key must not disappear")
-                val mixed = run.anchorTasks.single { it.key == "mixed" }.resolution!!
-                assertEquals(setOf(MatchStatus.PASS, MatchStatus.UNKNOWN), mixed.candidates.map { it.status }.toSet())
-                assertEquals(2, mixed.candidates.size)
-                if (round == 2) assertEquals(ResolutionStatus.UNKNOWN, run.anchorTasks.single { it.key == "escaped-name" }.resolution!!.status)
-                val out = cli.output.resolve("unsupported-published-$version-$round")
-                cli.execute("unsupported-publish-$version-$round", "analysis", "publish", "--run", dir, "--out", out)
-                val knowledge = cli.read<VersionKnowledge>(out.resolve("knowledge.json"))
-                assertTrue(knowledge.entries.isEmpty())
-                assertEquals(setOf("escaped-lifecycle"), knowledge.anchors.map { it.key }.toSet())
-                PublishedFixtureAssertions.verify(cli, apk(version), out.resolve("knowledge.json"), oracle.getValue(version),
-                    emptyMap(), mapOf("escaped-lifecycle" to ExpectedPublishedAnchor(namespace + "EscapedLifecycle")))
-                base = out
-            }
+            val dir = cli.output.resolve("unsupported-$version")
+            cli.execute("unsupported-$version", "analysis", "prepare", "--apk", apk(version), "--rules", rules, "--run", dir)
+            val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
+            for (key in listOf("setter", "helper", "mixed")) assertEquals(ResolutionStatus.UNKNOWN,
+                run.anchorTasks.single { it.key == key }.resolution!!.status, "$version unsupported $key must not disappear")
+            val mixed = run.anchorTasks.single { it.key == "mixed" }.resolution!!
+            assertEquals(setOf(MatchStatus.PASS, MatchStatus.UNKNOWN), mixed.candidates.map { it.status }.toSet())
+            assertEquals(2, mixed.candidates.size)
+            assertEquals(ResolutionStatus.UNKNOWN, run.anchorTasks.single { it.key == "escaped-name" }.resolution!!.status)
+            val out = cli.output.resolve("unsupported-published-$version")
+            cli.execute("unsupported-publish-$version", "analysis", "publish", "--run", dir, "--out", out)
+            val knowledge = cli.read<VersionKnowledge>(out.resolve("knowledge.json"))
+            assertTrue(knowledge.entries.isEmpty())
+            assertEquals(setOf("escaped-lifecycle"), knowledge.anchors.map { it.key }.toSet())
+            PublishedFixtureAssertions.verify(cli, apk(version), out.resolve("knowledge.json"), oracle.getValue(version),
+                emptyMap(), mapOf("escaped-lifecycle" to ExpectedPublishedAnchor(namespace + "EscapedLifecycle")))
         }
     }
 
@@ -346,17 +317,11 @@ class MultiRoundIntegrationTest {
         names.getValue("ResponseRecord") to ExpectedPublishedMembers(fields = listOf(
             ExpectedPublishedField("DEFAULT", sourceType("ResponseRecord"), 0x18))))
 
-    private fun verifyRoundPublished(out: Path, version: String, round: Int): PublishedDexFacts {
+    private fun verifyPublished(out: Path, version: String): PublishedDexFacts {
         val facts = PublishedFixtureAssertions.verify(cli, apk(version), out.resolve("knowledge.json"), oracle.getValue(version),
             entryTruth(), anchorTruth(version), memberTruth())
-        val expectedNames = when (round) {
-            1 -> emptySet()
-            2 -> setOf(names.getValue("RequestRecord"), names.getValue("ResponseRecord"))
-            else -> names.values.toSet()
-        }
-        assertEquals(expectedNames, facts.entries.map { it.name }.toSet(), "Round $round confirmed entry set")
-        val firstKeys = setOf("logger", "lifecycle", "ambiguous", "unknown-lifecycle", "rpc", "swapped-rpc")
-        assertEquals(if (round == 1) firstKeys else anchorTruth(version).keys, facts.anchors.map { it.key }.toSet(), "Round $round support anchor set")
+        assertEquals(names.values.toSet(), facts.entries.map { it.name }.toSet())
+        assertEquals(anchorTruth(version).keys, facts.anchors.map { it.key }.toSet())
         return facts
     }
     private fun verify(out: Path, version: String, knowledge: VersionKnowledge) {
