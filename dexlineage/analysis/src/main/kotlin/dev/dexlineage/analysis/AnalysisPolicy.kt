@@ -100,7 +100,7 @@ internal object AnalysisPolicy {
     /** Both the selected entity and the resolved dependency chain are part of semantic review. */
     internal fun proofRefs(proof: Resolution): Set<ClassRef> = buildSet {
         val selected = proof.uniqueEntity
-        proof.matches.filter { it.status == MatchStatus.PASS && (selected == null || it.owner == selected.owner && it.method == selected.method) }
+        proof.matches.filter { it.status == MatchStatus.PASS && (selected == null || it.entity == selected) }
             .forEach { addAll(it.relatedRefs); addAll(it.trace.map { trace -> trace.owner }) }
         proof.dependencies.values.forEach { anchor ->
             add(anchor.binding.owner)

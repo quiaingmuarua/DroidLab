@@ -6,6 +6,7 @@ import dev.dexlineage.knowledge.DependencyEvidence
 import dev.dexlineage.knowledge.RuleProofs
 import dev.dexlineage.model.*
 import dev.dexlineage.rules.facts.DexFactSession
+import dev.dexlineage.rules.facts.OriginalEntities
 import java.nio.file.Path
 
 /** One offline execution: evaluate declared symbol prerequisites, then their consumers. */
@@ -34,8 +35,9 @@ class InRunResolutionSession internal constructor(
         all.forEach(registry::validate)
         val producers = available.mapValues { it.value.rule } + evaluator.symbolRules + anchorRules
         all.forEach { registry.validateDependencyDefinitions(it, producers) }
-        val result = evaluator.execute(rules, anchorRules, available)
         val current = factSession(all.flatMap { registry.literals(it) }.toSet(), emptySet())
+        available.values.forEach { OriginalEntities.requirePresent(current, it.binding) }
+        val result = evaluator.execute(rules, anchorRules, available)
         Digests.verify(artifact)
         return ResolutionBatch(result.resolutions, current.scan, analysis(), result.waiting,
             artifacts.toList(), evaluator.resolvedAnchors.toSortedMap(), evaluator.evaluatedRules.toList())
@@ -81,14 +83,13 @@ class InRunResolutionSession internal constructor(
         val current = factSession(rules.flatMap { registry.literals(it) }.toSet(),
             dependencies.values.flatMap { it.values }.mapNotNull { it.binding.method }.toSet())
         dependencies.values.flatMap { it.values }.distinctBy { it.key }.forEach { dependency ->
-            requireInput(current.classes[dependency.binding.owner.descriptor]?.ref == dependency.binding.owner,
-                "Dependency class/DEX identity absent from APK")
-            dependency.binding.method?.let { requireInput(current.method(it) != null, "Dependency method absent from APK") }
+            OriginalEntities.requirePresent(current, dependency.binding)
         }
         val resolved = linkedMapOf<String, Resolution>()
         val builtin = rules.filter { it.strategyId == "builtin.locators" }
         if (builtin.isNotEmpty()) {
-            val query = RuleEngine.queryWithScan(artifact, builtin.flatMap { it.locators }, outputRoot.resolve("work/fields"), current.scan)
+            val raw = RuleEngine.queryWithScan(artifact, builtin.flatMap { it.locators }, outputRoot.resolve("work/fields"), current.scan)
+            val query = raw.copy(matches = OriginalEntities.record(current, raw.matches))
             remember(query.analysis)
             engine.resolveQuery(artifact, builtin, engineBuildId, query).forEach { (id, proof) ->
                 resolved[id] = proof
@@ -116,7 +117,7 @@ class InRunResolutionSession internal constructor(
     private fun anchor(key: String, rule: RuleRevision, proof: Resolution): SupportAnchor {
         val refs = buildSet {
             add(proof.uniqueEntity!!.owner)
-            proof.matches.filter { it.status == MatchStatus.PASS && EntityRef(it.owner, it.method) == proof.uniqueEntity }.forEach { match ->
+            proof.matches.filter { it.status == MatchStatus.PASS && it.entity == proof.uniqueEntity }.forEach { match ->
                 addAll(match.relatedRefs)
                 addAll(match.trace.map { it.owner })
                 match.field?.call?.declaringType?.let { owner -> facts!!.classes[owner]?.ref?.let(::add) }

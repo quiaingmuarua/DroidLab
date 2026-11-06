@@ -28,7 +28,7 @@ Project codecs are explicitly supplied with the runtime. They interpret old scen
 
 The execution context owns a current-APK fact session and a memoized result per effective rule and dependency binding. Only UNIQUE symbols become inputs to dependants. Failed prerequisites block their dependants without preventing unrelated matching. Configuration cycles and missing definitions fail before execution.
 
-Dependency evidence is identified from APK/rule/implementation and code content without the final runId. A complete SupportAnchor is constructed before downstream Resolution IDs; publication uses that same canonical anchor object. Review evidence remains bound to the final run. New runs use `dependencyEvaluation: "in-run"`; absent markers retain the legacy frozen-base validation semantics and unchanged fingerprints. Knowledge schema 4 stays unchanged.
+Dependency evidence is identified from APK/rule/implementation and code content without the final runId. A complete SupportAnchor is constructed before downstream Resolution IDs; publication uses that same canonical anchor object. Review evidence remains bound to the final run. New runs use `dependencyEvaluation: "in-run"`; absent markers retain the legacy frozen-base validation semantics and unchanged fingerprints. Knowledge remains schema 4; optional additions are omitted from historical records.
 
 Interrupted work is rerun in a new directory. `analysis status/resume` only provide migration guidance; workspace locks, receipts and stage adoption are retired. Existing Review journal and publish-at behavior remain unchanged.
 
@@ -191,7 +191,7 @@ Acceptance requires the frozen threshold, legal alias where applicable, matching
 
 ## Knowledge, revisions and proof boundaries
 
-Current JSON is schema 4. `VersionKnowledge` contains `knowledgeId`, `parentKnowledgeId`, APK `artifact`, confirmed class `entries`, supporting `anchors`, historical `unresolved` entries and provenance. Migration publications also retain `migrationSourceKnowledgeId` to pin a resumed target flow to its original source. An entry retains `semanticId`, name, raw binding, captures, active `ruleRevision`, `resolution`, code evidence and rationale/provenance; its `locators` are populated for built-in rules. Confirmed entries must have a UNIQUE CLASS Resolution that agrees with their binding. A support anchor has a role key, CLASS/METHOD binding and its own UNIQUE proof, with no display name. Historical entries can retain an older proof standard but cannot masquerade as current confirmations.
+Current JSON is schema 4. `VersionKnowledge` contains `knowledgeId`, `parentKnowledgeId`, APK `artifact`, confirmed class `entries`, supporting `anchors`, historical `unresolved` entries, optional `unresolvedAnchors` and provenance. Migration publications also retain `migrationSourceKnowledgeId` to pin a resumed target flow to its original source. An entry retains `semanticId`, name, raw binding, captures, active `ruleRevision`, `resolution`, code evidence and rationale/provenance; its `locators` are populated for built-in rules. Confirmed entries must have a UNIQUE CLASS Resolution that agrees with their binding. A support anchor has a role key, CLASS/METHOD/FIELD binding and its own UNIQUE proof, with no display name. Historical entries can retain an older proof standard but cannot masquerade as current confirmations.
 
 Class identity combines APK SHA-256, original DEX descriptor and DEX entry; methods additionally bind the original name and full descriptor. Display names and exported Java paths are not identities. Descriptor-to-Tiny conversion occurs at the Mapping boundary, and only confirmed class entries are exported.
 
@@ -217,3 +217,27 @@ There is no dynamic Handler runtime, generic Agent workflow or automatic graph s
 The explicit `fixtureIntegrationTest` task builds and validates the fixtures before driving installed CLI subprocesses. The fixture oracle and R8 Mapping belong exclusively to the test side. Production matching consumes APKs and ordinary rule inputs; Reviews use predefined fixture semantics only after candidates agree with independently mapped source identities. Public fixture regression validates the mechanism, while private real-case acceptance retains actual Agent review. See [fixture testing](fixture-testing.md) for the flow, maintenance and diagnostic artifacts.
 
 After publication, a test-side consumer reads the saved `knowledge.json` and independently indexes the APK through the existing DEX input library. It uses only published raw bindings to retrieve classes and full-identity method anchors, then returns actual member facts to outer R8-oracle assertions. The consumer neither reads expected owners nor derives its answer from stored matching facts. Historical unresolved entries are excluded from current-APK lookup. This is a static artifact-consumption check, separate from matching re-execution, publication replay and JADX alias readback; it introduces no production API or second mapping format.
+
+
+## Portable symbol consumption
+
+`knowledge export-symbols --knowledge <knowledge.json> --keys <keys.json> --out <new-bindings.json>`
+validates the published package and exports an explicit JSON array of stable keys. Anchor keys and
+confirmed class semantic IDs are supported; missing, unresolved or conflicting keys fail the whole
+export. Member records require access facts captured from their actual declaring owner during matching.
+Older packages remain readable; a member with no recorded flags needs a fresh execution before export.
+
+The schema-1 `symbol-bindings` document contains one APK SHA-256, a source Knowledge ID/file hash,
+and a `symbols` map. Each record has kind, declaring `owner` descriptor and `dexEntry`; METHOD/FIELD
+also carry original `name`, complete `descriptor` (method signature or field type), and `isStatic`.
+CLASS records have no member properties. No rule, run path, evidence path, project role wiring or
+execution steps are copied. Consumers record the file they actually read, verify the target and
+member contract, and do not claim to reprove a symbol's role from reflection alone. The source hash
+is attribution, not a signature or a substitute for source-package validation.
+
+FIELD is an original identity, separate from existing field-initializer evidence. It is not a Rename
+operation; Tiny v2 still includes only accepted class names. Fresh Analysis/Migration runs freeze
+`anchorPublication: "retained-v1"`: failed/waiting anchors keep their keys, rules and historical source.
+Same-APK confirmed symbols survive failed updates with their original proof. Legacy null markers keep
+the old publication semantics, and new nullable wire fields are omitted when absent so saved digests
+and publication replay remain intact.

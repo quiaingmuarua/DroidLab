@@ -56,7 +56,8 @@ class OneShotAnalysis(private val service: AnalysisService = AnalysisService()) 
     }
 
     private fun definitions(plan: AnalysisMethodPlan, base: VersionKnowledge?): Map<String, RuleRevision> =
-        base?.anchors.orEmpty().associate { it.key to it.rule } + plan.seedRules?.anchors.orEmpty().associate { it.key to RuleProofs.revision(it.locators, it.strategy) }
+        base?.unresolvedAnchors.orEmpty().associate { it.key to it.rule } + base?.anchors.orEmpty().associate { it.key to it.rule } +
+            plan.seedRules?.anchors.orEmpty().associate { it.key to RuleProofs.revision(it.locators, it.strategy) }
 
     fun run(methodId: String, configPath: Path, workDir: Path): AnalysisExecutionResult {
         val input = inputs(methodId, configPath.toAbsolutePath().normalize())

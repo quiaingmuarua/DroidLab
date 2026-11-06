@@ -55,7 +55,25 @@ class FactoryAnalysis : AnalysisMethod {
                 requires = mapOf("factory" to "factory"))))
 }
 
-fun environment() = DexLineageRuntime(listOf(ConstructedClass()), listOf(FactoryAnalysis()))
+/** A terminal FIELD symbol, resolved by declaration shape rather than its renamed address. */
+class InstanceIntegerField : MatchingHandler {
+    override val id = "example.instance-integer-field"
+    override val resultKind = EntityKind.FIELD
+    override val dependencyKinds = mapOf("owner" to EntityKind.CLASS)
+    override fun validate(rule: RuleRevision) {
+        requireInput(rule.parameters.size() == 0 && rule.locators.isEmpty(), "Example field accepts no parameters")
+    }
+    override fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult {
+        val owner = dependencies.getValue("owner").binding.owner
+        return StrategyResult(session.fields(owner.descriptor).filter { it.type == "I" && it.flags and 8 == 0 }.map { field ->
+            MatchFact(owner, MatchStatus.PASS, listOf(FactorResult("instance-integer-field", MatchStatus.PASS,
+                "Declared instance integer field on the uniquely constructed product")), emptyMap(),
+                fieldRef = FieldRef(owner, field.name, field.type))
+        })
+    }
+}
+
+fun environment() = DexLineageRuntime(listOf(ConstructedClass(), InstanceIntegerField()), listOf(FactoryAnalysis()))
 
 fun main(args: Array<String>) {
     val runtime = environment()

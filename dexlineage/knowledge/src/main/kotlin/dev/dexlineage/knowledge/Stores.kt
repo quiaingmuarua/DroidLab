@@ -70,7 +70,7 @@ object KnowledgeFiles {
 
     fun write(output: Path, value: VersionKnowledge): VersionKnowledge {
         val normalized = value.copy(entries = value.entries.sortedBy { it.semanticId }, unresolved = value.unresolved.sortedBy { it.entry.semanticId },
-            anchors = value.anchors.sortedBy { it.key }, knowledgeId = "")
+            anchors = value.anchors.sortedBy { it.key }, unresolvedAnchors = value.unresolvedAnchors?.sortedBy { it.key }, knowledgeId = "")
         validate(normalized)
         evidenceClosure(normalized).forEach {
             verifyCode(output, it.evidenceId, it.javaPath, it.javaSha256, it.smaliPath, it.smaliSha256)
@@ -90,15 +90,48 @@ object KnowledgeFiles {
 
     fun evidenceClosure(value: Resolution): List<KnowledgeEvidence> = uniqueEvidence(value.dependencies.values.flatMap(::evidenceClosure))
     fun evidenceClosure(value: SupportAnchor): List<KnowledgeEvidence> = uniqueEvidence(value.evidence + evidenceClosure(value.resolution))
+    fun evidenceClosure(value: UnresolvedAnchor): List<KnowledgeEvidence> = uniqueEvidence(value.evidence +
+        value.resolution?.let(::evidenceClosure).orEmpty() + value.lastConfirmed?.let(::evidenceClosure).orEmpty())
     fun evidenceClosure(value: KnowledgeEntry): List<KnowledgeEvidence> = uniqueEvidence(value.evidence + value.resolution?.let(::evidenceClosure).orEmpty())
     fun evidenceClosure(value: VersionKnowledge): List<KnowledgeEvidence> = uniqueEvidence(
-        value.entries.flatMap(::evidenceClosure) + value.unresolved.flatMap { evidenceClosure(it.entry) } + value.anchors.flatMap(::evidenceClosure))
+        value.entries.flatMap(::evidenceClosure) + value.unresolved.flatMap { evidenceClosure(it.entry) } + value.anchors.flatMap(::evidenceClosure) +
+            value.unresolvedAnchors.orEmpty().flatMap(::evidenceClosure))
 
     fun copyEntry(sourceRoot: Path, output: Path, value: KnowledgeEntry): KnowledgeEntry {
         evidenceClosure(value).forEach { copyEvidence(sourceRoot, output, it) }; return value
     }
     fun copyAnchor(sourceRoot: Path, output: Path, value: SupportAnchor): SupportAnchor {
         evidenceClosure(value).forEach { copyEvidence(sourceRoot, output, it) }; return value
+    }
+    fun copyUnresolvedAnchor(sourceRoot: Path, output: Path, value: UnresolvedAnchor): UnresolvedAnchor {
+        evidenceClosure(value).forEach { copyEvidence(sourceRoot, output, it) }; return value
+    }
+
+    /** All observed proof owners, including rejected facts and unresolved paths, remain inspectable. */
+    fun proofRefs(value: Resolution): Set<ClassRef> = buildSet {
+        addAll(value.candidates.map { it.ref })
+        value.matches.forEach { add(it.owner); addAll(it.relatedRefs); addAll(it.trace.map { trace -> trace.owner }) }
+        addAll(value.unresolvedPaths.orEmpty().map { it.source.owner })
+    }
+
+    fun validateUnresolvedAnchor(anchor: UnresolvedAnchor, apkSha256: String) {
+        requireInput(anchor.key.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")) && anchor.originRun.isNotBlank(), "Unresolved anchor requires a key and origin run")
+        RuleProofs.validate(anchor.rule)
+        requireInput(anchor.waitingFor == anchor.waitingFor.distinct().sorted() && anchor.waitingFor.all { it in anchor.rule.requires.values }, "Invalid unresolved anchor dependency set")
+        val proof = anchor.resolution
+        if (proof == null) requireInput(anchor.waitingFor.isNotEmpty(), "Unexecuted anchor requires missing dependencies")
+        else {
+            RuleProofs.validate(proof)
+            requireInput(proof.status != ResolutionStatus.UNIQUE && proof.rule == anchor.rule && proof.apkSha256 == apkSha256 && anchor.waitingFor.isEmpty(), "Unresolved anchor has an invalid current proof")
+            requireInput(anchor.evidence.map { it.ref }.containsAll(proofRefs(proof)), "Unresolved anchor lacks observed proof code evidence")
+            proof.dependencies.values.forEach { validateAnchor(it, apkSha256) }
+        }
+        requireInput(anchor.evidence.all { it.ref.apkSha256 == apkSha256 }, "Unresolved anchor evidence belongs to another APK")
+        requireInput((anchor.lastConfirmed == null) == (anchor.lastConfirmedKnowledgeId == null), "Incomplete last-confirmed anchor source")
+        anchor.lastConfirmed?.let {
+            requireInput(it.key == anchor.key && !anchor.lastConfirmedKnowledgeId.isNullOrBlank(), "Last-confirmed anchor identity mismatch")
+            validateAnchor(it)
+        }
     }
     fun validateAnchor(anchor: SupportAnchor, apkSha256: String? = null) {
         RuleProofs.validateAnchor(anchor, apkSha256)
@@ -118,8 +151,10 @@ object KnowledgeFiles {
         requireInput(ids.distinct().size == ids.size, "Duplicate semantic identity in knowledge")
         requireInput(value.entries.map { it.binding.descriptor }.distinct().size == value.entries.size, "Duplicate current class binding")
         requireInput(value.entries.map { Identities.renamedFullName(it.binding.descriptor, it.name) }.distinct().size == value.entries.size, "Duplicate confirmed class name")
-        requireInput(value.anchors.map { it.key }.distinct().size == value.anchors.size, "Duplicate anchor key")
+        val anchorKeys = value.anchors.map { it.key } + value.unresolvedAnchors.orEmpty().map { it.key }
+        requireInput(anchorKeys.distinct().size == anchorKeys.size, "Duplicate current or unresolved anchor key")
         value.anchors.forEach { validateAnchor(it, value.artifact.sha256) }
+        value.unresolvedAnchors.orEmpty().forEach { validateUnresolvedAnchor(it, value.artifact.sha256) }
         value.entries.forEach {
             requireInput(it.semanticId.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")), "Confirmed knowledge requires semantic identity")
             requireInput(it.binding.apkSha256 == value.artifact.sha256, "Confirmed binding belongs to another APK")

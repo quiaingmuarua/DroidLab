@@ -6,6 +6,7 @@ import dev.dexlineage.knowledge.ImplementationIdentity
 import dev.dexlineage.model.*
 import dev.dexlineage.apk.ApkReader
 import dev.dexlineage.rules.facts.DexFactSession
+import dev.dexlineage.rules.facts.OriginalEntities
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipFile
@@ -47,20 +48,14 @@ class ResolutionEngine(val registry: StrategyRegistry = StrategyRegistry(),
         val waiting = revisions.mapNotNull { rule -> rule.requires.values.filter { it !in anchors }.distinct().sorted().takeIf { it.isNotEmpty() }?.let { rule.revisionId to it } }.toMap()
         val ready = revisions.filter { it.revisionId !in waiting }
         val dependencies = ready.associate { it.revisionId to registry.checkDependencies(it, artifact, anchors) }
-        if (ready.all { it.strategyId == "builtin.locators" }) {
-            val query = RuleEngine.query(artifact, ready.flatMap { it.locators }, workDir)
-            return ResolutionBatch(resolveQuery(artifact, ready, engineBuildId, query), query.scan, query.analysis, waiting)
-        }
         val builtin = ready.filter { it.strategyId == "builtin.locators" }
         val custom = ready.filter { it.strategyId != "builtin.locators" }
         val results = linkedMapOf<String, StrategyResult>()
         lateinit var builtinQuery: QueryResult
         DexFactSession(artifact, ready.flatMap { registry.literals(it) }.toSet(), dependencies.values.flatMap { it.values }.mapNotNull { it.binding.method }.toSet()).use { session ->
-            dependencies.values.flatMap { it.values }.distinctBy { it.key }.forEach { anchor ->
-                requireInput(session.classes[anchor.binding.owner.descriptor]?.ref == anchor.binding.owner, "Anchor class/DEX identity absent from APK")
-                anchor.binding.method?.let { requireInput(session.method(it) != null, "Anchor method absent from APK") }
-            }
-            builtinQuery = RuleEngine.queryWithScan(artifact, builtin.flatMap { it.locators }, workDir, session.scan)
+            anchors.values.forEach { OriginalEntities.requirePresent(session, it.binding) }
+            val raw = RuleEngine.queryWithScan(artifact, builtin.flatMap { it.locators }, workDir, session.scan)
+            builtinQuery = raw.copy(matches = OriginalEntities.record(session, raw.matches))
             custom.forEach { rule -> results[rule.revisionId] = registry.execute(session, rule, dependencies.getValue(rule.revisionId)) }
         }
         val resolutions = resolveQuery(artifact, builtin, engineBuildId, builtinQuery).toMutableMap()

@@ -41,8 +41,9 @@ object RuleProofs {
         val indices = if (rule.strategyId == "builtin.locators") rule.locators.indices else 0..0
         requireInput(matches.all { it.owner.apkSha256 == apkSha256 && it.locatorIndex in indices }, "Rule facts belong to another APK or locator")
         matches.forEach { match ->
-            requireInput(EntityRef(match.owner, match.method).kind == rule.resultKind, "Fact entity kind differs from rule")
-            validateEntity(EntityRef(match.owner, match.method))
+            requireInput(match.entity.kind == rule.resultKind, "Fact entity kind differs from rule")
+            validateEntity(match.entity)
+            requireInput(match.accessFlags == null || match.accessFlags >= 0, "Invalid entity access flags")
         }
         val unresolved = unresolvedPaths.orEmpty().distinct().sortedWith(compareBy(
             { EntityRef(it.source.owner, it.source).identity }, { it.codeUnitOffset ?: -1 }, { JsonFiles.encode(it) }))
@@ -52,11 +53,15 @@ object RuleProofs {
             requireInput(path.codeUnitOffset == null || path.codeUnitOffset >= 0, "Invalid unresolved path offset")
             requireInput(path.reason.isNotBlank(), "Unresolved path needs a reason")
         }
-        val sorted = matches.sortedWith(compareBy({ it.locatorIndex }, { EntityRef(it.owner, it.method).identity },
+        matches.groupBy { it.entity }.values.forEach { facts ->
+            requireInput(facts.mapNotNull { it.accessFlags }.distinct().size <= 1, "Conflicting entity access flags")
+        }
+        val sorted = matches.sortedWith(compareBy({ it.locatorIndex }, { it.entity.identity },
             { it.field?.fieldName.orEmpty() }, { it.field?.fieldType.orEmpty() }, { JsonFiles.encode(it) }))
-        val candidates = sorted.filter { it.status != MatchStatus.FAIL }.groupBy { EntityRef(it.owner, it.method).identity }.toSortedMap().map { (_, facts) ->
-            requireInput(facts.map { EntityRef(it.owner, it.method) }.distinct().size == 1, "Conflicting original entity identities")
-            ResolutionCandidate(facts.first().owner, if (facts.any { it.status == MatchStatus.PASS }) MatchStatus.PASS else MatchStatus.UNKNOWN, facts, facts.first().method)
+        val candidates = sorted.filter { it.status != MatchStatus.FAIL }.groupBy { it.entity.identity }.toSortedMap().map { (_, facts) ->
+            requireInput(facts.map { it.entity }.distinct().size == 1, "Conflicting original entity identities")
+            ResolutionCandidate(facts.first().owner, if (facts.any { it.status == MatchStatus.PASS }) MatchStatus.PASS else MatchStatus.UNKNOWN,
+                facts, facts.first().method, facts.first().fieldRef)
         }
         val passCount = candidates.count { it.status == MatchStatus.PASS }
         val status = when {
@@ -76,7 +81,7 @@ object RuleProofs {
 
     /** A compact capture summary; conflicting alternatives remain explicit in the full proof. */
     fun captures(value: Resolution): Map<String, String> = value.matches
-        .filter { EntityRef(it.owner, it.method) == value.uniqueEntity && it.status == MatchStatus.PASS }
+        .filter { it.entity == value.uniqueEntity && it.status == MatchStatus.PASS }
         .flatMap { it.captures.entries }.groupBy({ it.key }, { it.value })
         .mapNotNull { (key, values) -> values.distinct().singleOrNull()?.let { key to it } }.toMap().toSortedMap()
 
@@ -101,9 +106,19 @@ object RuleProofs {
     fun validateEntity(entity: EntityRef) {
         Identities.requireDescriptor(entity.owner.descriptor)
         requireInput(entity.owner.dexEntry.matches(Regex("classes(?:[0-9]+)?\\.dex")), "Invalid DEX entry")
+        requireInput(entity.method == null || entity.field == null, "Entity cannot be both a method and a field")
         entity.method?.let {
             requireInput(it.owner == entity.owner && it.name.isNotBlank() && it.descriptor.matches(Regex("\\([^)]*\\).+")), "Invalid method identity")
         }
+        entity.field?.let {
+            requireInput(it.owner == entity.owner && it.name.isNotBlank() && fieldType(it.type), "Invalid field identity")
+        }
+    }
+
+    private fun fieldType(value: String): Boolean {
+        val element = value.dropWhile { it == '[' }
+        if (element.length == 1 && element[0] in "ZBSCIJFD") return true
+        return try { Identities.requireDescriptor(element); true } catch (_: ValidationException) { false }
     }
 
     fun validateAnchor(anchor: SupportAnchor, apkSha256: String? = null) {

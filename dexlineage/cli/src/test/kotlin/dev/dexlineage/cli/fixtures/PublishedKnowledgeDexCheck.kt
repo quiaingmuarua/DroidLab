@@ -9,7 +9,7 @@ import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 data class PublishedClassFacts(val semanticId: String, val name: String, val clazz: RawDexClass)
-data class PublishedAnchorFacts(val key: String, val clazz: RawDexClass, val method: RawDexMethod?)
+data class PublishedAnchorFacts(val key: String, val clazz: RawDexClass, val method: RawDexMethod?, val field: RawDexField? = null)
 data class PublishedDexFacts(val knowledgeId: String, val apkSha256: String,
     val entries: List<PublishedClassFacts>, val anchors: List<PublishedAnchorFacts>,
     val unresolvedSemanticIds: List<String>, val elapsedMillis: Long)
@@ -46,7 +46,13 @@ object PublishedKnowledgeDexCheck {
                     method.ref.owner == ref.owner.descriptor && method.ref.name == ref.name && method.ref.descriptor == ref.descriptor
                 }) { "Published method anchor is absent or not unique in actual DEX: ${anchor.key}: ${ref.owner.descriptor}->${ref.name}${ref.descriptor}" }
             }
-            PublishedAnchorFacts(anchor.key, clazz, method)
+            val field = anchor.binding.field?.let { ref ->
+                require(ref.owner == anchor.binding.owner && method == null) { "Published field anchor has conflicting identity: ${anchor.key}" }
+                requireNotNull(clazz.fields.singleOrNull { it.name == ref.name && it.type == ref.type }) {
+                    "Published field anchor is absent or not unique in actual DEX: ${anchor.key}: ${ref.name}:${ref.type}"
+                }
+            }
+            PublishedAnchorFacts(anchor.key, clazz, method, field)
         }
         // Historical unresolved addresses deliberately remain unconsumed on the current APK.
         return PublishedDexFacts(knowledge.knowledgeId, index.apkSha256, entries, anchors,
