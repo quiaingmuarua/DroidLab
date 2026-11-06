@@ -32,7 +32,7 @@ tasks.register("test") {
 }
 tasks.named("check") { dependsOn(modules.map { ":dexlineage:$it:check" }) }
 tasks.named("assemble") { dependsOn(modules.map { ":dexlineage:$it:assemble" }) }
-tasks.named("build") { dependsOn(modules.map { ":dexlineage:$it:build" }) }
+tasks.named("build") { dependsOn(modules.map { ":dexlineage:$it:build" }); dependsOn(":dexlineage:external-example:test") }
 tasks.named<Delete>("clean") {
     dependsOn(modules.map { ":dexlineage:$it:clean" })
     delete(rootProject.layout.buildDirectory.dir("install/dexlineage"))
@@ -42,14 +42,9 @@ tasks.register("installDist") {
     description = "Install the CLI distribution at build/install/dexlineage."
     dependsOn(":dexlineage:cli:installDist")
 }
-tasks.register("realCaseTest") {
-    group = "verification"
-    description = "Run the explicitly configured real-case integration test in cli."
-    dependsOn(":dexlineage:cli:realCaseTest")
-}
-
 tasks.register("fixtureIntegrationTest") {
     group = "verification"
     description = "Build public R8 APK fixtures and exercise the installed CLI end to end."
     dependsOn(":dexlineage:cli:fixtureIntegrationTest")
+    dependsOn(":dexlineage:external-example:fixtureIntegrationTest")
 }

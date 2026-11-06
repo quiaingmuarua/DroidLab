@@ -2,7 +2,7 @@ package dev.dexlineage.rules
 
 import dev.dexlineage.io.*
 import dev.dexlineage.model.*
-import dev.dexlineage.rules.facts.DexFactSession
+import dev.dexlineage.rules.facts.ApkFacts
 
 internal object LocatorHandler : MatchingHandler {
     override val id = "builtin.locators"
@@ -13,7 +13,7 @@ internal object LocatorHandler : MatchingHandler {
         rule.locators.forEach(RuleEngine::validate)
     }
     override fun scanNeeds(rule: RuleRevision) = ScanNeeds(rule.locators.map { it.anchor }.toSet())
-    override fun execute(session: DexFactSession, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult =
+    override fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult =
         error("Locator execution uses the existing batched locator adapter")
 }
 
@@ -31,7 +31,7 @@ internal object MethodSignatureHandler : MatchingHandler {
         rule.parameters.get("returnSameAsOwner")?.let { requireInput(it.isJsonPrimitive && it.asJsonPrimitive.isBoolean, "Expected boolean: returnSameAsOwner") }
         HandlerInputs.accessFlags(rule)
     }
-    override fun execute(session: DexFactSession, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult {
+    override fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult {
         val p = rule.parameters; val owner = dependencies.getValue("owner").binding.owner
         return StrategyResult(session.methods(owner.descriptor).filter { method ->
             method.id.args == p.array("parameterTypes") && (p.string("returnType") == null || method.id.result == p.string("returnType")) &&

@@ -1,6 +1,6 @@
 # Public APK integration regression
 
-The fixture suite preserves supported rules and invariants through the real Android toolchain, including schema-4 execution-local dependencies and compiled recipes. It complements the data-level unit tests and the private `realCaseTest`; it does not discover new rules or assess an Agent's ability to infer semantics.
+The fixture suite preserves supported rules and invariants through the real Android toolchain, including schema-4 execution-local dependencies and compiled recipes. It complements the data-level unit tests and project-owned real-case acceptance; it does not discover new rules or assess an Agent's ability to infer semantics.
 
 ## Run
 
@@ -10,7 +10,7 @@ Run commands from the DroidLab root using JDK 21 and its single committed Wrappe
 ./gradlew :dexlineage:fixtureIntegrationTest
 ```
 
-Use `.\gradlew.bat :dexlineage:fixtureIntegrationTest` on Windows PowerShell. This explicit task builds the root-owned `:dexlineage:fixture-apk` Android application module, exports each Release variant through `SingleArtifact.APK` to `dexlineage/fixtures/android/build/fixture-inputs/<variant>/`, installs the CLI, validates the generated fixture, then runs the `fixture-integration` test group. Export requires exactly one APK from the Android artifact metadata; tests do not guess `outputs/apk` or `intermediates/apk` paths. The `:dexlineage:test`, `:dexlineage:check` and `:dexlineage:build` tasks exclude that group; pass `-Pandroid=false` for JVM-only work without an Android SDK. `:dexlineage:realCaseTest` remains an independent task with explicit external private case configuration.
+Use `.\gradlew.bat :dexlineage:fixtureIntegrationTest` on Windows PowerShell. This explicit task builds the root-owned `:dexlineage:fixture-apk` Android application module, exports each Release variant through `SingleArtifact.APK` to `dexlineage/fixtures/android/build/fixture-inputs/<variant>/`, installs the CLI, validates the generated fixture, then runs the `fixture-integration` test group. Export requires exactly one APK from the Android artifact metadata; tests do not guess `outputs/apk` or `intermediates/apk` paths. The `:dexlineage:test`, `:dexlineage:check` and `:dexlineage:build` tasks exclude that group; pass `-Pandroid=false` for JVM-only work without an Android SDK. Project-specific acceptance tasks live with their extension implementations.
 
 To build only the Android module:
 
@@ -34,44 +34,11 @@ The installed production CLI runs in child processes. Test code does not call An
 
 Before accepting a task, the harness compares actual matching results with the independent oracle. It uses case-authored semantic conclusions for the Review and fills in only the real run, rule, Resolution and evidence references. These are deterministic test inputs, not simulated Agent reasoning. An actual analysis session still needs someone to read and judge the evidence.
 
-`AnalysisRunIntegrationTest` exercises `messages.grpc` in both APK versions and the generic `profile` method with a private logger. One CLI invocation creates one matching run and its Review packet without intermediate knowledge, receipts or stages. The suite rejects blank templates/incorrect proofs, submits predefined fixture semantics, and publishes explicitly. It preserves out-of-scope matching, uncertain competitors, shared-type deduplication, saved publication replay, offline DEX/Oracle assertions and independent JADX readback. Retired status/resume commands return guidance instead of executing recovery.
+`FixtureIntegrationTest` preserves built-in matching, ambiguity/UNKNOWN gates, explicit Review, atomic submission, continuation, publication replay and independent Mapping readback. `AnalysisRunIntegrationTest` covers the generic profile entry and retirement guidance for old recovery commands.
 
-For a focused development run, use `./gradlew :dexlineage:cli:fixtureIntegrationTest --tests '*AnalysisRunIntegrationTest'`. The `:dexlineage:fixtureIntegrationTest` aggregate task does not accept `--tests`. Full CI continues to run the entire public suite and uploads only build-directory diagnostics.
+The verification-only `external-example` project compiles against installed JARs only. A project-owned handler consumes a factory CLASS dependency and reports its constructed result class; a project-owned AnalysisMethod supplies the task draft. Its child-process CLI flow covers unique/ambiguous/unknown/blocked results, current Reviews, Migration and publication, and checks a modified extension resource cannot reuse a current proof. R8 Mapping stays in outer assertions.
 
-`ProtoIntegrationTest` runs real protoc-lite output through the installed `messages.proto-relations` workflow. The source and target retain message roles at tags 1 and 2 while generated field names change and an unrelated scalar is removed/added. A third field shares the tag-1 child class; the catalogue must retain both field relationships without creating another rename target. Raw DEX preflight verifies those generated fields, metadata literals and the repeated element class literal before matching. Missing tags and wrong cardinalities remain visible as NO_MATCH; map and oneof layouts remain UNKNOWN without partial accepted fields. The test uses predefined proposed names and no oracle-derived corpus input. R8 Mapping is used only to assert actual candidates and published bindings. One Migration prepare resolves the parent and children; a separate target-base continuation verifies already confirmed results are retained. A generated Migration review packet supplies identities and evidence before predefined fixture judgments are filled. Run this suite with `./gradlew :dexlineage:cli:fixtureIntegrationTest --tests '*ProtoIntegrationTest'`.
-
-The Proto checks inspect generated metadata and published identities. They do not execute generated parsers, decode serialized message bytes or claim behavior equivalence. The same published JSON-to-DEX consumer, independent R8 assertions and JADX readback apply to these results.
-
-Assertions cover:
-
-- public and private static final loggers, captures distinct from confirmed aliases, and real factory/owner evidence;
-- strings in other methods, non-final/instance fields and incompatible signatures that cannot supply a valid bound initialization;
-- competitors outside discovery scope, duplicate component owners and unknown initialization that block uniqueness;
-- tag, factory and obfuscated symbol changes across versions, missing signals and newly ambiguous targets;
-- whole-rule replacement, same-APK ID continuity, preservation after failed updates, review identity validation and idempotency;
-- missing Review, invalid ACCEPT attempts, process restart, saved publication replay and independent Mapping readback.
-
-The dependency fixture additionally uses self-authored logger, Handler and RPC models. The source-side simulated JADX annotations are derived from the independent R8 oracle and supplied only to the corpus importer; they are post-match assertions, not matcher parameters. It checks:
-
-- a CLASS logger anchor followed by a full-identity METHOD factory anchor, with methods renamed between versions;
-- multiple same-signature methods in one owner remaining ambiguous, and UNKNOWN prerequisites blocking downstream execution;
-- className/requestId role extraction, interface implementations and constant-name returns;
-- service/RPC, builder and request/response relationships, including marshaller factory versus constructor forms and relocation between Stub/helper owners;
-- corpus targets remaining UNCONFIGURED when no rule exists, and imported source identity mismatches being rejected after matching;
-- anchors available within the same prepare without Review, while only reviewed class names enter Tiny;
-- target-version anchors being resolved again, target-base continuation, stale dependency evidence rejection and same-APK knowledge preservation.
-
-The related-RPC suite adds a single-prepare publication and migration flow for descriptor/builder/marshaller class roles. It covers `Object`-returning outer methods, declared interfaces versus concrete implementations, multiple complete constructions, and a uniquely identified method whose additional unknown construction must block downstream publication. The corpus research command is exercised on unconfigured targets; its evidence cannot be used as a matching-run Review. All published results use the same raw DEX consumption, R8 oracle assertions and independent JADX readback as the other suites.
-
-The gRPC discovery suite starts with framework anchors and discovers service/RPC names from actual calls in both R8 versions. It checks grouping of shared Proto roles, repeated versus conflicting constructions, configuration-only calls, unresolved construction paths, exact service/RPC identity and canonical IDs carried from an explicit reference package. Reference truth is checked against the R8 oracle before a test Review is submitted. Published names still pass offline DEX consumption and independent JADX readback.
-
-A deep Map/List configuration example preserves eight getter calls through R8 and passes the generated name through a self-authored boolean diagnostic guard before using it as a map key. It must remain a non-construction observation without poisoning unrelated RPCs; separate opaque-helper, field and return escapes remain UNKNOWN. The fixture checks the compiled getter and guard calls, not just different Java source text.
-
-For an affected change, run the gRPC suite with `./gradlew :dexlineage:cli:fixtureIntegrationTest --tests '*GrpcDiscoveryIntegrationTest'`; the `:dexlineage:fixtureIntegrationTest` aggregate task does not accept `--tests`. The unfiltered task in CI remains the complete public regression. Private theme acceptance uses `realCaseTest` with an explicit properties file whose `scenario=grpc-analysis` selects an Analysis-only manifest; it does not require inventing a Migration run. It independently reexecutes anchor/target matching and discovery, replays saved publications, checks declared new RPC pairs and referenced identities, and reads the final Mapping back through JADX.
-
-CLASS and METHOD use separate entity identities. Assertions for methods compare the full original owner/name/signature obtained from the test oracle; checking only an owner class would miss incorrect method deduplication. Fixture semantics remain predetermined, and no public test has a private Messages target count or path.
-
-Do not assert complete decompiled Java text, instruction offsets or APK hashes across builds. Assert identity, structure, captures, Resolution, review decisions and name application. APK digests still bind each actual run to its actual input.
+The public self-authored logger/RPC/Proto specimens remain available as test inputs. Tests that depend on concrete Messages recipes, readers, catalogue semantics or compatibility adapters are owned and run by the external Messages project. Public tests must not copy those implementations back into a test registry.
 
 ## Consume published knowledge through raw DEX
 
@@ -126,4 +93,4 @@ Public command records and run packages are under `dexlineage/cli/build/fixture-
 
 `dexlineage/cli/build/fixture-integration/apk-build.json` records elapsed time from SDK preflight through completion of both variant APK exports, excluding Gradle startup/configuration. It changes from STARTED to PASS only after both assemblies succeed; an interrupted or failed assembly leaves STARTED, with the failure in Gradle's task log. Suite reports include consumed class/method counts, rule and Resolution identities, oracle outcomes and command-stage timings. Offline DEX consumption and JADX readback are measured separately. Timings are observations for the current machine/cache state, not performance thresholds.
 
-CI uses immutable Action commit references, JDK 21 and the committed Wrapper. JVM checks run on Ubuntu 24.04 and Windows; APK integration runs on Ubuntu 24.04. Jobs have a 20-minute timeout. Diagnostic artifacts are retained for 14 days and contain only explicit public build paths. Neither `.local/`, `.runtime/`, private Messages artifacts nor machine SDK configuration is uploaded. A cache miss may cost time, but must not change correctness.
+CI uses immutable Action commit references, JDK 21 and the committed Wrapper. JVM checks run on Ubuntu 24.04 and Windows; APK integration runs on Ubuntu 24.04. Job limits and artifact retention are declared in the root CI workflow. Diagnostic artifacts contain only explicit public build paths. Neither `.local/`, `.runtime/`, private Messages artifacts nor machine SDK configuration is uploaded. A cache miss may cost time, but must not change correctness.

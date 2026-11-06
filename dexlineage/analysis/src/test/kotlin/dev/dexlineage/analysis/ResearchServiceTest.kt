@@ -27,14 +27,14 @@ class ResearchServiceTest {
         incomplete = true, diagnostics = listOf("Method not decompiled"), elapsedMillis = 1)
 
     @Test fun `manual targets are selectable before rules and unknown duplicate or empty selection is rejected`() {
-        assertEquals(listOf(target), ResearchService.selectTargets(corpus, listOf(target.targetId)))
+        assertEquals(listOf(target), ResearchService().selectTargets(corpus, listOf(target.targetId)))
         for (ids in listOf(emptyList(), listOf(""), listOf("missing"), listOf(target.targetId, target.targetId))) {
-            assertFailsWith<ValidationException> { ResearchService.selectTargets(corpus, ids) }
+            assertFailsWith<ValidationException> { ResearchService().selectTargets(corpus, ids) }
         }
     }
 
     @Test fun `research retains member and local annotations with partial code and original identity`() {
-        val result = ResearchService.attachTargets(corpus, listOf(target), listOf(facts), listOf(evidence)).single()
+        val result = ResearchService().attachTargets(corpus, listOf(target), listOf(facts), listOf(evidence)).single()
         assertEquals(listOf("CLASS", "FIELD", "METHOD", "LOCAL_VAR"), result.annotations.map { it.kind })
         assertEquals(7, result.annotations.last().codeRef!!.get("index").asInt)
         assertEquals(owner, result.facts.ref)
@@ -47,19 +47,19 @@ class ResearchServiceTest {
     @Test fun `research cannot attach code or facts from another raw entity`() {
         for (foreign in listOf(owner.copy(apkSha256 = "foreign"), owner.copy(dexEntry = "classes.dex"), owner.copy(descriptor = "Lother;"))) {
             assertFailsWith<ValidationException> {
-                ResearchService.attachTargets(corpus, listOf(target), listOf(facts.copy(ref = foreign)), listOf(evidence))
+                ResearchService().attachTargets(corpus, listOf(target), listOf(facts.copy(ref = foreign)), listOf(evidence))
             }
             assertFailsWith<ValidationException> {
-                ResearchService.attachTargets(corpus, listOf(target), listOf(facts), listOf(evidence.copy(ref = foreign)))
+                ResearchService().attachTargets(corpus, listOf(target), listOf(facts), listOf(evidence.copy(ref = foreign)))
             }
         }
     }
 
     @Test fun `research namespace freezes corpus selection and implementation identity`() {
         val file = Artifact("corpus.json", "corpus-file-hash")
-        val id = ResearchService.identity(file, corpus, listOf(target), "build-a")
-        assertEquals(id, ResearchService.identity(file, corpus, listOf(target), "build-a"))
-        assertNotEquals(id, ResearchService.identity(file, corpus, listOf(target), "build-b"))
-        assertNotEquals(id, ResearchService.identity(file.copy(sha256 = "changed"), corpus, listOf(target), "build-a"))
+        val id = ResearchService().identity(file, corpus, listOf(target), "build-a")
+        assertEquals(id, ResearchService().identity(file, corpus, listOf(target), "build-a"))
+        assertNotEquals(id, ResearchService().identity(file, corpus, listOf(target), "build-b"))
+        assertNotEquals(id, ResearchService().identity(file.copy(sha256 = "changed"), corpus, listOf(target), "build-a"))
     }
 }

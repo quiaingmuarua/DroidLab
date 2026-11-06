@@ -4,7 +4,6 @@ import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.*
 import dev.dexlineage.mapping.MappingOutput
 import dev.dexlineage.model.*
-import dev.dexlineage.rules.ResolutionEngine
 import dev.dexlineage.rules.RuleEngine
 import java.nio.file.Files
 import java.nio.file.Path
@@ -16,7 +15,7 @@ internal data class UpgradeResult(val knowledge: VersionKnowledge, val decisions
 /** Shared technical gate only; each explicit adapter validates its original semantic proof first. */
 internal object LegacyUpgrade {
     fun publish(artifact: Artifact, entries: List<KnowledgeEntry>, unresolved: List<UnresolvedKnowledge>, sourceRoot: Path,
-                out: Path, parentKnowledgeId: String, provenance: String, execute: ResolutionExecutor = ResolutionEngine::execute): UpgradeResult {
+                out: Path, parentKnowledgeId: String, provenance: String, execute: ResolutionExecutor): UpgradeResult {
         entries.flatMap { it.locators }.forEach(RuleEngine::validate)
         val revisions = entries.associate { it.semanticId to RuleProofs.revision(it.locators) }
         val batch = execute(artifact, revisions.values.toList(), out.resolve("work/revalidation"))

@@ -4,8 +4,6 @@ import com.google.gson.JsonParser
 import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.*
 import dev.dexlineage.model.*
-import dev.dexlineage.rules.ResolutionEngine
-import dev.dexlineage.rules.StrategyRegistry
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -19,11 +17,16 @@ internal data class AnalysisInputs(val configFile: Artifact, val apk: Artifact, 
     val inputFiles: List<Artifact>)
 
 /** One offline invocation. A failed invocation is retained for diagnosis and restarted in a new directory. */
-object OneShotAnalysis {
+class OneShotAnalysis(private val service: AnalysisService = AnalysisService()) {
+    private val runtime = service.runtime
+    private val engine = runtime.engine
+    private val registry = runtime.registry
+    private val methods = runtime.methods
+    private val json = runtime.json
     internal fun inputs(methodId: String, configPath: Path): AnalysisInputs = checkedInput("Analysis configuration") {
         val configFile = Digests.artifact(configPath)
         val json = JsonParser.parseString(Files.readString(configPath)).asJsonObject
-        val plan = AnalysisMethods.prepareConfig(methodId, configPath)
+        val plan = methods.prepareConfig(methodId, configPath, service::readRules)
         fun path(key: String): Path? = json.get(key)?.takeUnless { it.isJsonNull }?.asString?.let {
             requireInput(it.isNotBlank(), "Empty Analysis $key")
             configPath.toAbsolutePath().parent.resolve(it).normalize()
@@ -40,12 +43,12 @@ object OneShotAnalysis {
         val corpusFile = path("corpus")?.let(Digests::artifact)
         val corpus = corpusFile?.let { ManualCorpusFiles.read(Path.of(it.path)) }
         requireInput(corpus == null || corpus.apk.sha256 == apk.sha256, "Analysis corpus belongs to another APK")
-        requireInput(AnalysisMethods.get(methodId).corpusTargetIds(plan.profile).all { id -> corpus?.targets?.any { it.targetId == id } == true },
+        requireInput(methods.get(methodId).corpusTargetIds(plan.profile).all { id -> corpus?.targets?.any { it.targetId == id } == true },
             "Analysis method requires known targets from a supplied corpus")
         val definitions = definitions(plan, base)
         val discoveryRule = RuleProofs.revision(if (plan.profile.strategy == null) listOf(plan.profile.discovery) else emptyList(), plan.profile.strategy)
         RuleProofs.validateDependencies(definitions, listOf(discoveryRule), base?.anchors.orEmpty())
-        (definitions.values + discoveryRule).forEach { StrategyRegistry.validateDependencyDefinitions(it, definitions) }
+        (definitions.values + discoveryRule).forEach { registry.validateDependencyDefinitions(it, definitions) }
         val files = (listOf(configFile, apk) + plan.inputArtifacts + listOfNotNull(baseFile, corpusFile, corpus?.project) + references.map(Digests::artifact))
             .distinctBy { it.path }.sortedBy { it.path }
         files.forEach(Digests::verify)
@@ -64,34 +67,34 @@ object OneShotAnalysis {
         try {
             val plan = input.method
             val definitions = definitions(plan, input.base)
-            val inherited = AnalysisService.usableAnchors(input.base, definitions, ResolutionEngine.buildId())
+            val inherited = service.usableAnchors(input.base, definitions, engine.buildId())
             val sourceRoots = listOfNotNull(runDir, input.baseFile?.let { Path.of(it.path).parent })
-            val run = ResolutionEngine.openSession(input.apk, runDir).use { session ->
+            val run = engine.openSession(input.apk, runDir).use { session ->
                 val seeds = session.execute(emptyList(), definitions, inherited)
                 val discoveryDir = root.resolve("discovery")
-                val discovered = AnalysisService.discoverWithSession(Path.of(input.apk.path), Path.of(plan.profileFile.path), discoveryDir,
+                val discovered = service.discoverWithSession(Path.of(input.apk.path), Path.of(plan.profileFile.path), discoveryDir,
                     input.baseFile?.let { Path.of(it.path) }, session, seeds.resolvedAnchors, sourceRoots, plan.profile)
                 val discoveryPath = Path.of(discovered.discoveryPath)
-                val discovery = AnalysisService.readDiscovery(discoveryPath, input.apk)
+                val discovery = service.readDiscovery(discoveryPath, input.apk)
                 val rules = AnalysisRuleFile(discovery = Digests.artifact(discoveryPath), minConfidence = plan.profile.minConfidence,
-                    items = AnalysisMethods.forProfile(plan.profile).drafts(plan.profile, discovery.leads), anchors = plan.seedRules?.anchors.orEmpty())
+                    items = methods.forProfile(plan.profile).drafts(plan.profile, discovery.leads), anchors = plan.seedRules?.anchors.orEmpty())
                 val rulesPath = root.resolve("rules.json")
-                JsonFiles.writeNew(rulesPath, rules)
-                AnalysisService.prepareWithSession(Path.of(input.apk.path), rulesPath, runDir, input.baseFile?.let { Path.of(it.path) },
+                this.json.writeNew(rulesPath, rules)
+                service.prepareWithSession(Path.of(input.apk.path), rulesPath, runDir, input.baseFile?.let { Path.of(it.path) },
                     input.corpusFile?.let { Path.of(it.path) }, input.references, session)
             }
             val packetDir = root.resolve("packet")
-            ReviewPackets.write(runDir, AnalysisMethods.selectedReviewTaskIds(run), packetDir)
+            ReviewPackets(service).write(runDir, methods.selectedReviewTaskIds(run), packetDir)
             input.inputFiles.forEach(Digests::verify)
             val result = AnalysisExecutionResult(methodId = methodId, runId = run.runId, runPath = runDir.toString(),
                 discoveryPath = root.resolve("discovery/discovery.json").toString(), packetPath = packetDir.toString(),
                 discoveryWaitingFor = run.discovery?.waitingFor.orEmpty(), tasks = run.tasks.size,
                 resolutions = run.tasks.mapNotNull { it.resolution?.status?.name }.groupingBy { it }.eachCount().toSortedMap(),
                 waiting = run.tasks.count { it.executionState == AnalysisExecutionState.WAITING_DEPENDENCY }, evaluatedRules = run.evaluatedRules.orEmpty())
-            JsonFiles.writeNew(root.resolve("result.json"), result)
+            this.json.writeNew(root.resolve("result.json"), result)
             return result
         } catch (error: Exception) {
-            JsonFiles.writeNew(root.resolve("failure.json"), mapOf("operation" to "analysis.run", "message" to (error.message ?: error.javaClass.name),
+            this.json.writeNew(root.resolve("failure.json"), mapOf("operation" to "analysis.run", "message" to (error.message ?: error.javaClass.name),
                 "nextAction" to "Start a new output directory; completed run files remain readable."))
             throw error
         }

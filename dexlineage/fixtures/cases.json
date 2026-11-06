@@ -24,6 +24,50 @@
       "configuration": "fixtures/android/build/outputs/mapping/v2Release/configuration.txt"
     }
   },
+  "callObservation": {
+    "purpose": "Self-authored raw-call relationships, independent source truth for both renamed R8 versions. No device or network execution.",
+    "sourcePackage": "dev.dexlineage.fixture.callobservation",
+    "service": "fixture.observation.Service",
+    "rpc": "Lookup",
+    "markers": {
+      "raw": "fixture.observation.raw-call",
+      "metadata": "fixture.observation.metadata",
+      "ambiguous": "fixture.observation.ambiguous-call",
+      "unknown": "fixture.observation.unknown-call",
+      "uncertain": "fixture.observation.uncertain-competing-call",
+      "mixed": "fixture.observation.mixed-stream-call"
+    },
+    "versions": {
+      "v1": { "raw": "UNIQUE", "ambiguous": "AMBIGUOUS", "unknown": "UNKNOWN", "uncertain": "UNKNOWN", "mixed": "UNKNOWN", "sendForwardingDepth": 0 },
+      "v2": { "raw": "UNIQUE", "ambiguous": "AMBIGUOUS", "unknown": "UNKNOWN", "uncertain": "UNKNOWN", "mixed": "UNKNOWN", "sendForwardingDepth": 1 }
+    },
+    "sourceRoles": {
+      "rawCall": "RawCall",
+      "call": "AbstractCall",
+      "listener": "ConcreteListener",
+      "descriptor": "Descriptor",
+      "metadata": "Metadata",
+      "status": "Status",
+      "statusCode": "StatusCode",
+      "protoBase": "MessageBase",
+      "protoMessage": "BytesBase"
+    },
+    "sourceMethods": {
+      "rawStart": ["RawCall", "start", "(Ldev/dexlineage/fixture/callobservation/ConcreteListener;Ldev/dexlineage/fixture/callobservation/Metadata;)V"],
+      "rawSend": ["RawCall", "send", "(Ljava/lang/Object;)V"],
+      "listenerResponse": ["RecordingListener", "response", "(Ljava/lang/Object;)V"],
+      "listenerClose": ["RecordingListener", "close", "(Ldev/dexlineage/fixture/callobservation/Status;Ldev/dexlineage/fixture/callobservation/Metadata;)V"],
+      "statusCode": ["Status", "getCode", "()Ldev/dexlineage/fixture/callobservation/StatusCode;"],
+      "statusCodeValue": ["StatusCode", "value", "()I"],
+      "statusDescription": ["Status", "getDescription", "()Ljava/lang/String;"],
+      "protoSerializedSize": ["MessageBase", "getSerializedSize", "()I"],
+      "protoToByteArray": ["BytesBase", "toByteArray", "()[B"]
+    },
+    "sourceFields": {
+      "rawDescriptor": ["RawCall", "descriptor", "Ldev/dexlineage/fixture/callobservation/Descriptor;"],
+      "descriptorName": ["Descriptor", "fullName", "Ljava/lang/String;"]
+    }
+  },
   "cases": [
     {
       "id": "publicCache",

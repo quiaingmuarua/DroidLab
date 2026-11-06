@@ -111,6 +111,9 @@ jobs:
             dexlineage/cli/build/reports/tests/fixtureIntegrationTest/**
             dexlineage/cli/build/test-results/fixtureIntegrationTest/**
             dexlineage/cli/build/fixture-integration/**
+            dexlineage/examples/external/build/reports/tests/**
+            dexlineage/examples/external/build/test-results/**
+            dexlineage/examples/external/build/fixture-results/**
             dexlineage/fixtures/android/build/fixture-inputs/**
             dexlineage/fixtures/android/build/outputs/**
           retention-days: 7

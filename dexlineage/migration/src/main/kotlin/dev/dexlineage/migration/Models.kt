@@ -2,6 +2,7 @@ package dev.dexlineage.migration
 
 import dev.dexlineage.io.Digests
 import dev.dexlineage.io.JsonFiles
+import dev.dexlineage.io.JsonCodec
 import dev.dexlineage.model.*
 
 data class MigrationRuleOverride(val semanticId: String = "", val locators: List<Locator> = emptyList(), val expectedRevision: String? = null,
@@ -46,7 +47,7 @@ data class MigrationRun(
     val resolvedAnchors: Map<String, SupportAnchor>? = null,
     val evaluatedRules: List<String>? = null,
 ) {
-    fun fingerprint(): String = Digests.text(JsonFiles.encode(copy(runId = "", createdAt = "",
+    fun fingerprint(json: JsonCodec = JsonFiles): String = Digests.text(json.encode(copy(runId = "", createdAt = "",
         sourceScan = sourceScan.copy(elapsedMillis = 0), targetScan = targetScan.copy(elapsedMillis = 0), analysisMillis = 0)))
 }
 data class MigrationReview(val taskId: String = "", val resolutionId: String = "", val ruleRevisionId: String = "",

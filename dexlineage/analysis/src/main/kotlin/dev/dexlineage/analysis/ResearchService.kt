@@ -21,13 +21,13 @@ data class AnalysisResearchResult(val schemaVersion: Int = SCHEMA_VERSION, val r
     val targetCount: Int, val researchPath: String, val evidencePaths: List<String>, val counts: Map<String, Int>)
 
 /** Reads manual source targets before rule authoring; never creates a run, Resolution or Review. */
-object ResearchService {
+class ResearchService(private val engine: ResolutionEngine = ResolutionEngine(), private val json: JsonCodec = JsonCodec()) {
     fun research(corpusPath: Path, targetIds: List<String>, out: Path): AnalysisResearchResult {
         val started = System.nanoTime()
         val corpusFile = Digests.artifact(corpusPath)
         val corpus = ManualCorpusFiles.read(corpusPath)
         val selected = selectTargets(corpus, targetIds)
-        val buildId = ResolutionEngine.buildId()
+        val buildId = engine.buildId()
         val researchId = identity(corpusFile, corpus, selected, buildId)
         createNewDirectory(out)
         try {
@@ -50,13 +50,13 @@ object ResearchService {
                 apk = corpus.apk, engineBuildId = buildId, targets = targets, scan = raw.scan, counts = counts,
                 factsMillis = raw.elapsedMillis, decompileMillis = decompileMillis, elapsedMillis = (System.nanoTime() - started) / 1_000_000)
             val path = out.resolve("research.json")
-            JsonFiles.writeNew(path, document)
+            json.writeNew(path, document)
             return AnalysisResearchResult(researchId = researchId, corpusId = corpus.corpusId, targetCount = targets.size,
                 researchPath = path.toAbsolutePath().toString(), evidencePaths = evidence.flatMap {
                     listOfNotNull(it.javaPath, it.smaliPath).map { relative -> out.resolve(relative).toAbsolutePath().toString() }
                 }, counts = counts)
         } catch (e: Exception) {
-            JsonFiles.writeNew(out.resolve("failure.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "operation" to "analysis.research",
+            json.writeNew(out.resolve("failure.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "operation" to "analysis.research",
                 "researchId" to researchId, "error" to if (e is ValidationException) "validation" else "execution",
                 "message" to (e.message ?: e.javaClass.name)))
             throw e
@@ -70,7 +70,7 @@ object ResearchService {
     }
 
     internal fun identity(corpusFile: Artifact, corpus: ManualCorpus, selected: List<ManualTarget>, buildId: String): String =
-        Digests.text(JsonFiles.encode(mapOf("kind" to "analysis-research", "schemaVersion" to SCHEMA_VERSION,
+        Digests.text(json.encode(mapOf("kind" to "analysis-research", "schemaVersion" to SCHEMA_VERSION,
             "corpusFile" to corpusFile, "corpusId" to corpus.corpusId, "apk" to corpus.apk,
             "targets" to selected.map { it.targetId }.sorted(), "engineBuildId" to buildId,
             "toolVersion" to TOOL_VERSION, "jadxVersion" to JADX_VERSION)))

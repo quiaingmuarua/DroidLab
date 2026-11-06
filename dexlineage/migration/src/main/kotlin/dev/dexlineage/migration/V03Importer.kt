@@ -11,9 +11,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /** Explicit import of v0.3 packages. History paths are explicit inputs, never ambient directory scans. */
-object V03Importer {
+class V03Importer(private val engine: ResolutionEngine = ResolutionEngine(), private val json: JsonCodec = JsonCodec()) {
     fun importKnowledge(knowledgePath: Path, apkPath: Path, out: Path, historyPaths: List<Path> = emptyList()): VersionKnowledge =
-        importWithExecutor(knowledgePath, apkPath, out, historyPaths, ResolutionEngine::execute)
+        importWithExecutor(knowledgePath, apkPath, out, historyPaths, engine::execute)
 
     internal fun importWithExecutor(knowledgePath: Path, apkPath: Path, out: Path, historyPaths: List<Path> = emptyList(),
                                     execute: ResolutionExecutor): VersionKnowledge = checkedInput("v0.3 import") {
@@ -56,7 +56,7 @@ object V03Importer {
             primary.knowledge.unresolved.map { it.historical() }, primary.root, out, primary.knowledge.knowledgeId,
             "v03-import:${primary.knowledge.knowledgeId}", execute)
         packages.flatMap { it.artifacts }.forEach(Digests::verify)
-        JsonFiles.writeNew(out.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "v03-import-report",
+        this.json.writeNew(out.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "v03-import-report",
             "knowledgeId" to upgraded.knowledge.knowledgeId, "parentKnowledgeId" to primary.knowledge.knowledgeId,
             "sourceKnowledge" to Digests.artifact(knowledgePath), "historyKnowledgeIds" to packages.drop(1).map { it.knowledge.knowledgeId },
             "legacyArtifacts" to packages.flatMap { it.artifacts }, "decisions" to upgraded.decisions,
@@ -70,9 +70,9 @@ object V03Importer {
     private fun readPackage(path: Path): Package {
         val root = path.parent
         val raw = JsonParser.parseString(Files.readString(path)).asJsonObject
-        val knowledge = JsonFiles.read(path, V03Knowledge::class.java, 3)
-        requireInput(raw == JsonFiles.gson.toJsonTree(knowledge), "Unsupported or incomplete schema-3 knowledge fields")
-        requireInput(knowledge.kind == "version-knowledge" && knowledge.knowledgeId == Digests.text(JsonFiles.encode(knowledge.copy(knowledgeId = ""))), "v0.3 knowledge fingerprint mismatch")
+        val knowledge = this.json.read(path, V03Knowledge::class.java, 3)
+        requireInput(raw == this.json.gson.toJsonTree(knowledge), "Unsupported or incomplete schema-3 knowledge fields")
+        requireInput(knowledge.kind == "version-knowledge" && knowledge.knowledgeId == Digests.text(this.json.encode(knowledge.copy(knowledgeId = ""))), "v0.3 knowledge fingerprint mismatch")
         val allIds = knowledge.entries.map { it.semanticId } + knowledge.unresolved.map { it.entry.semanticId }
         requireInput(allIds.distinct().size == allIds.size, "Duplicate v0.3 semantic identity")
         requireInput(knowledge.entries.map { it.binding }.distinct().size == knowledge.entries.size, "Duplicate v0.3 current binding")
@@ -132,7 +132,7 @@ object V03Importer {
         requireInput(review["resolutionId"]?.asString == proof.resolutionId && review["ruleRevisionId"]?.asString == proof.rule.revisionId, "Historical Review used another matching proof")
         val supersedes = review["supersedes"]?.takeUnless { it.isJsonNull }?.asString
         val record = StoredReview(schemaVersion = 3, revisionId = "", runId = pkg.runId, taskId = taskId, supersedes = supersedes, payload = review)
-        val revision = Digests.text(JsonFiles.encode(record))
+        val revision = Digests.text(this.json.encode(record))
         requireInput(pkg.report.getAsJsonObject("reviewRevisions")[taskId]?.asString == revision && entry.provenance == "${pkg.scene}:${pkg.runId}:$revision", "Historical Review revision mismatch")
         requireInput(decision["name"]?.asString == entry.name && parse(decision, "target", ClassRef::class.java) == entry.binding, "Historical Review output differs from entry")
         val ids = strings(review, "evidenceIds")
@@ -159,9 +159,9 @@ object V03Importer {
 
     private fun verifyResolution(proof: V03Resolution) {
         val rule = proof.rule
-        requireInput(rule.locators.isNotEmpty() && rule.locators == rule.locators.distinct() && rule.revisionId == Digests.text(JsonFiles.encode(rule.locators)), "v0.3 rule digest mismatch")
+        requireInput(rule.locators.isNotEmpty() && rule.locators == rule.locators.distinct() && rule.revisionId == Digests.text(this.json.encode(rule.locators)), "v0.3 rule digest mismatch")
         requireInput(proof.schemaVersion == 3 && proof.engineVersion == "0.3.0" && proof.engineBuildId.isNotBlank() && proof.searchScope == "apk-all-dex", "Unsupported historical matching engine")
-        requireInput(proof.resolutionId == Digests.text(JsonFiles.encode(proof.copy(resolutionId = ""))), "v0.3 Resolution digest mismatch")
+        requireInput(proof.resolutionId == Digests.text(this.json.encode(proof.copy(resolutionId = ""))), "v0.3 Resolution digest mismatch")
         val sorted = proof.matches.sortedWith(compareBy({ it.locatorIndex }, { it.owner.descriptor }, { it.field?.fieldName.orEmpty() }, { it.field?.fieldType.orEmpty() }))
         requireInput(sorted == proof.matches, "Historical facts are not canonical")
         proof.matches.forEach { fact ->
@@ -186,5 +186,5 @@ object V03Importer {
         else requireInput(evidence.smaliSha256 == null, "Historical Smali hash without file")
     }
     private fun strings(obj: JsonObject, key: String): List<String> = obj.getAsJsonArray(key)?.map { it.asString } ?: throw ValidationException("Missing historical $key")
-    private fun <T> parse(obj: JsonObject, key: String, type: Class<T>): T = JsonFiles.gson.fromJson(obj[key] ?: throw ValidationException("Missing historical $key"), type)
+    private fun <T> parse(obj: JsonObject, key: String, type: Class<T>): T = this.json.gson.fromJson(obj[key] ?: throw ValidationException("Missing historical $key"), type)
 }

@@ -46,7 +46,7 @@ class V03ImporterTest {
     }
 
     private fun import(f: Fixture, output: String, results: List<Pair<String, MatchStatus>> = listOf("La;" to MatchStatus.PASS), history: List<Path> = emptyList()) =
-        V03Importer.importWithExecutor(f.root.resolve("knowledge.json"), Path.of(f.apk.path), temp.resolve(output), history) { artifact, rules, _ ->
+        V03Importer().importWithExecutor(f.root.resolve("knowledge.json"), Path.of(f.apk.path), temp.resolve(output), history) { artifact, rules, _ ->
             val resolutions = rules.associate { rule -> rule.revisionId to RuleProofs.create(artifact.sha256, rule, "new-engine", results.map { (descriptor, state) ->
                 MatchFact(ClassRef(artifact.sha256, descriptor, "classes.dex"), state, listOf(FactorResult("anchor", state, "reexecuted fixture")), mapOf("literal" to "SourceComponent"))
             }) }

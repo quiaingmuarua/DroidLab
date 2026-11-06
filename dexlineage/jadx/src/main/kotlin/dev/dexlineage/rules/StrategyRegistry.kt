@@ -6,12 +6,14 @@ import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.RuleProofs
 import dev.dexlineage.model.*
 import dev.dexlineage.rules.facts.DexFactSession
-import dev.dexlineage.messages.MessagesHandlers
+import dev.dexlineage.rules.facts.ApkFacts
 import java.nio.file.Path
 
 /** Compile-time registry. A strategy is executable matching code, never a publication authority. */
-object StrategyRegistry {
-    private val registered = HandlerRegistry(listOf(LocatorHandler, MethodSignatureHandler) + MessagesHandlers.all)
+class StrategyRegistry(extensions: List<MatchingHandler> = emptyList()) {
+    private val definitions = (listOf(LocatorHandler, MethodSignatureHandler) + extensions).toList()
+    private val registered = HandlerRegistry(definitions)
+    internal val implementationClasses: Map<String, Class<*>> = definitions.associate { it.id to it.javaClass }
 
     internal fun handler(rule: RuleRevision): MatchingHandler = registered.handler(rule.strategyId)
     fun dependencyKinds(rule: RuleRevision): Map<String, EntityKind> {
@@ -35,7 +37,7 @@ object StrategyRegistry {
     }
 
     internal fun literals(rule: RuleRevision): Set<String> = handler(rule).scanNeeds(rule).literals
-    internal fun execute(session: DexFactSession, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult =
+    internal fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult =
         handler(rule).execute(session, rule, dependencies)
     internal fun deferredEvidence(rule: RuleRevision): Boolean = handler(rule).evidenceMode == EvidenceMode.ON_INSPECT
 
@@ -61,6 +63,6 @@ object StrategyRegistry {
 
 }
 
-internal fun JsonObject.string(key: String): String? = get(key)?.takeUnless { it.isJsonNull }?.asString
-internal fun JsonObject.number(key: String, default: Int) = get(key)?.asInt ?: default
-internal fun JsonObject.array(key: String): List<String>? = getAsJsonArray(key)?.map { it.asString }
+fun JsonObject.string(key: String): String? = get(key)?.takeUnless { it.isJsonNull }?.asString
+fun JsonObject.number(key: String, default: Int) = get(key)?.asInt ?: default
+fun JsonObject.array(key: String): List<String>? = getAsJsonArray(key)?.map { it.asString }

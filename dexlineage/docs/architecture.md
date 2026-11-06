@@ -7,20 +7,20 @@
 | `analysis` | Manual corpus, discovery, current-APK targets, symbol dependencies, naming review and publication | `knowledge`, `jadx` |
 | `migration` | Fixed-target continuity, rule overrides, unresolved carry-forward and publication | `knowledge`, `jadx` |
 | `knowledge` | Version data, original CLASS/METHOD identities, rules, anchors, dependency proofs, evidence and review journal | None |
-| `jadx` | Raw DEX facts, compiled strategy registry, application recipes, code rendering, Tiny and Mapping readback | `knowledge` |
+| `jadx` | Raw DEX facts, explicit strategy registry, public facts, code rendering, Tiny and Mapping readback | `knowledge` |
 | `cli` | Scene commands, distribution and explicit integration checks | `analysis`, `migration`, `jadx` |
 
 The scenes do not call each other. `VersionKnowledge` is their handoff. Each scene owns its tasks, run fingerprint, review meaning and publication decisions. Analysis methods run prerequisite discovery and target matching once. There is no Agent loop, stage recovery coordinator, graph scheduler or second publication service.
 
-## Mechanism and analysis methods
+## Core, scenarios and projects
 
-`MatchingHandler` is the compiled matching extension contract. A handler owns its parameter and producer validation, dependency kinds, scan requirements, matching function, evidence mode and typed observations. Registration is explicit. The registry looks up opaque strategy IDs and the engine applies shared APK identity, dependency, complete-scan and uniqueness invariants. The registry and engine do not classify RPCs or infer business names.
+`MatchingHandler` and `AnalysisMethod` are public compiled extension contracts. A project supplies ordinary implementations to `DexLineageRuntime`; its main invokes `runCli(args, runtime)`. Core CLI construction supplies built-ins only. Registries are immutable instances shared by Analysis, Migration, inspection and publication. Duplicate IDs fail and separate runtime instances do not share registrations.
 
-Reusable matching capabilities bind actual objects and relationships and preserve uncertainty; they are not one-to-one wrappers around JADX getters. The Messages implementation owns its logger/Handler/RPC conventions, including the strategies historically named `grpc-java.*`. Those IDs remain stable for saved rules and do not claim cross-application coverage. A matching handler cannot submit Review or write Mapping.
+Core owns full-domain matching, symbol dependencies, unique/ambiguous/unknown decisions, evidence, Review and publication. A scenario owns the method-specific interpretation, drafts and typed artefacts. A project chooses those implementations and owns app adaptation, parameters, samples and acceptance. Naming a class a scenario does not make its implementation a core capability.
 
-`AnalysisMethod` owns the analysis-side configuration, prerequisite rule definitions, discovery-to-draft transformation, grouping, task explanation and scenario reports. `messages.grpc` supplies the RPC topic analysis, `messages.proto-relations` supplies fixed one-hop field targets, and `profile` supplies the generic discovery/template flow. Analysis owns input freezing, execution, review and publication. Migration continues using the same matching handlers through its existing knowledge-driven lifecycle.
+Handlers receive `ApkFacts`: original declarations and references, hierarchy, local values, bounded call/return slices, control shape and exception regions. JADX input objects and the raw loaders remain internal. The interface exposes existing analysis capabilities, not a wrapper for each backend getter. Domain interpretation and local conventions stay in the project.
 
-Scenario observations have concrete DTOs and codecs owned by their scenario. The shared runtime freezes artifact kind/path/digest references without interpreting service/RPC/role. Historical schema-4 RPC fields are read and written only through compatibility codecs so existing hashes and saved publication replay retain their original wire layout. New optional fields are omitted when absent; old files are never normalized in place before their identities are checked.
+Project codecs are explicitly supplied with the runtime. They interpret old scenario wire fields while preserving their original layout and fingerprints. No model annotation or default registry names a concrete project. The knowledge protocol retains legacy optional wire fields only for historical hash preservation; generic matching does not interpret their domain meanings.
 
 ## Single analysis execution
 
@@ -71,46 +71,11 @@ METHOD results use the full owner plus original method name and descriptor. Two 
 
 ## Compiled strategies and dependencies
 
-The registry dispatches registered Kotlin handlers. Each handler validates its own configuration and dependencies, reads facts and returns candidate facts; it has no publication authority. No reflection-based package loader, script runtime or generic Agent workflow is involved. Application-specific behavior remains in a Messages package while reusable matching operations stay shared.
+The core registers `builtin.locators` and `builtin.method-signature`. Project handlers declare an opaque ID, result kind, dependency roles, parameter/producer validation, scan needs and evidence requirements. `requires` resolves current-APK CLASS/METHOD symbols in one execution; failed prerequisites leave dependants blocked. A handler returns matching facts and typed scene artifacts; shared policy alone builds Resolution and controls publication.
 
-| Strategy ID | Result | Dependency roles | Main configuration |
-|---|---|---|---|
-| `builtin.method-signature` | METHOD | `owner`: CLASS | `parameterTypes`, optional return type/self return and access flags |
-| `messages.logger-fields` | CLASS | `factory`: METHOD | Optional `tag`, `component`, capture index and field flags |
-| `messages.handler-name-method` | METHOD | `lifecycle`: CLASS | Exact `logLiteral`, argument role index |
-| `messages.named-handler` | CLASS | `nameMethod`: METHOD | Optional component name |
-| `messages.rpc-descriptor` | METHOD | None | `service`, `rpc`, optional descriptor field-label configuration |
-| `messages.rpc-message` | CLASS | `descriptor`: METHOD | Same RPC identity and `role`: request or response |
-| `messages.rpc-related-type` | CLASS | `descriptor`: METHOD produced by `messages.rpc-descriptor` | `role`: descriptor, builder or marshaller; RPC identity and effective labels inherited from producer |
-| `grpc-java.full-method-name` | METHOD | `descriptor`: CLASS | Observed static two-String signature and slash-concatenation body |
-| `grpc-java.rpc-discovery` | CLASS facts plus call catalogue | `nameFactory`: METHOD | Optional Descriptor role labels; all direct calls are inventoried |
-| `grpc-java.rpc-message` | CLASS | `nameFactory`: METHOD | Nonempty exact `selectors` array of service/RPC/request-or-response roles; optional role labels |
-| `messages.proto-fields` | CLASS facts plus one-hop catalogue | `parent`: CLASS | No parameters; reads the supported parent metadata layout |
-| `messages.proto-field-type` | CLASS | `parent`: CLASS | `fieldNumber`, `cardinality`: singular or repeated |
+Public `ApkFacts` sessions share the existing full APK inventory and demand-driven indices. Only their owner closes a session. Externally compiled code can consume the same bounded analysis without copying a parser or reaching into Kotlin internals.
 
-`requires` maps a local role to an anchor key, for example `{"factory":"logger-factory"}`. A key is a lookup into the current-execution symbols or validated same-APK base knowledge, not a displayed name or an old obfuscated descriptor. A resolved dependency can legitimately constrain a search to all implementations of its interface or all uses of its factory; it cannot constrain the search to a desired answer list.
-
-Unknown strategies/parameters, absent dependency definitions, producer-kind mismatches and cycles are input errors. A defined prerequisite that is not yet uniquely resolved produces `WAITING_DEPENDENCY` with no Resolution. Each successful Resolution freezes the actual dependency objects and their proofs, so substituting another revision changes its identity.
-
-Dependency evaluation is local to one prepare: prerequisites are uniquely resolved before their dependants execute. No intermediate publication is required. UNIQUE anchors have no Rename authority; class names still require owner and dependency-chain Review. A valid same-APK base can preserve confirmed results. Changed rules, implementation or dependencies require fresh matching; prior publications stay immutable.
-
-Messages-specific strategies identify the logging-name role rather than assuming every no-argument String method has that role. RPC strategies bind service, RPC, builder and request/response roles in one construction, supporting the observed static marshaller factory and constructor forms. Unsupported flow remains UNKNOWN. Source/target symbol names, input corpora and test oracle identities do not choose candidates.
-
-The Proto strategy interprets a bounded Lite metadata format inside Messages code. `CallSlices` only supplies path-specific call/return and array-lifetime facts, including switch targets and uncertainty; existing `RawTrace.read` behavior remains unchanged. The strategy verifies inherited factories, parent default instances, complete metadata cursors and original field types before selecting a child. Analysis corpus input and opaque Migration artifact storage do not interpret Proto fields. See [one-hop Proto analysis](messages-proto-relations.md) for supported layouts and the finite workflow.
-
-RPC related types retain typed construction facts: descriptor allocation, builder method owner, both role-field declaration types and actual marshaller implementation types. The `marshaller` role requires one common declaration interface with compatible implementations. An outer RPC method returning `Object` does not identify its descriptor type. Multiple constructions are considered together: different complete role types remain ambiguous, and any unresolved construction downgrades all known related-role candidates to UNKNOWN before normal class deduplication can prefer PASS. A dependency whose complete construction cannot be reproduced fails execution rather than manufacturing NO_MATCH. Related-type rules inherit service/RPC/label configuration from the verified producer, and cannot override it independently.
-
-## Messages gRPC shapes and RPC catalogue
-
-The gRPC strategies reuse the Descriptor construction reader used by existing Messages RPC rules. Their starting point is a current-APK full-method-name anchor. A session indexes references to that exact owner/name/signature and caches the corresponding call/construction catalogue. Several methods constructing one RPC do not have to become a unique METHOD: class queries union all matching role types and then apply normal entity uniqueness.
-
-The catalogue retains direct call positions, captured service/RPC strings, construction states, role types and diagnostics. A configuration call whose result does not feed a Descriptor construction remains an observation, without becoming a Proto candidate. Potential constructions with unresolved arguments or types remain explicit. An optional `unresolvedPaths` field in a matching proof records those paths with their source method, instruction location, known selector parts and reason. Relevant uncertainty blocks UNIQUE even when no defensible candidate class can be emitted; it must not be represented by inventing a caller-as-Proto candidate. Two definite types remain AMBIGUOUS. Absent optional fields stay omitted so existing schema-4 digests remain stable.
-
-When an argument expression reaches the local depth budget, a finite call-result token retains its producer site and method without pretending to know its value. This prevents unrelated unknown values from being treated as the same RPC name. The reader can also prove a limited boolean-check/exception-formatting shape used by configuration validation: normal execution returns immediately, and failure only formats and throws an argument exception. This proof examines the called code; it does not exempt an application address or a method name. Opaque helpers, field escapes and returned names remain unresolved.
-
-The Messages Analysis method owns RPC draft grouping and naming. Its `method.parameters` select review services and request/response suggestion suffixes; the compatibility codec accepts the former `rpcDrafts` shape. These options never narrow APK discovery or class matching. All relations supporting one Proto class produce one task and one finite selectors-set rule. Capture values stay separate from suggested names; conflicting suggestions remain unnamed. RPC caller identities are evidence, while discovery owner checks refer to the actual Proto class.
-
-Explicit same-APK `--reference-knowledge` inputs are frozen in the Analysis run. Current confirmed bindings can supply semantic IDs and canonical names after unique matching, without importing their Review, anchors or old proof into the new decision. Reference-only entries require fresh matching and semantic review before publication; unrelated reference entries are not copied. The report records identity provenance, and the publication retains its own evidence closure. Base-knowledge failure protection continues to apply only to the base snapshot.
+The engine implementation identity covers core artifacts, registered handler/method/codec identities and actual contributed code/resources, including helpers in the same artifact. Absolute paths and ZIP timestamps do not define identity. Extension changes require fresh matching and current Review; version strings are not substitutes for code hashes.
 
 ## Manual annotation corpus
 
@@ -143,7 +108,7 @@ A discovery profile has `schemaVersion: 4`, `id` and either `discovery` (an exis
 }
 ```
 
-An item may supply `semanticId` to update an existing same-APK entry, `corpusTargetId` to link a manual target, or `strategy` instead of `locators`. Top-level `anchors` declare support rules by `key`; these may return CLASS or METHOD. Rename items must return CLASS. See the [dependency example](../examples/multiround-rules.json) and [RPC example](../examples/rpc-rules.json). A discovery-generated file also contains `discovery: {path, sha256}` and `discoveryKey` per linked item. The frozen discovery provides its original owner; after unrestricted rule execution, the unique result must agree with that owner. No handwritten expected target is accepted. New rules can also be authored directly without discovery.
+An item may supply `semanticId` to update an existing same-APK entry, `corpusTargetId` to link a manual target, or `strategy` instead of `locators`. Top-level `anchors` declare support rules by `key`; these may return CLASS or METHOD. Rename items must return CLASS. See the [external dependency example](../examples/external/README.md). A discovery-generated file also contains `discovery: {path, sha256}` and `discoveryKey` per linked item. The frozen discovery provides its original owner; after unrestricted rule execution, the unique result must agree with that owner. No handwritten expected target is accepted. New rules can also be authored directly without discovery.
 
 With `--base-knowledge`, Analysis freezes a same-APK knowledge revision. It reuses IDs by original current binding, publishes accepted updates plus unchanged base entries, and retains historical unresolved items. Failed attempts remain visible in run/report without replacing valid base names, bindings or rules. Explicit same-APK pending targets may be retried. Cross-APK pending targets are carried, not silently claimed by name. Moving an existing semantic ID to another entity in the same APK is outside this version.
 

@@ -98,6 +98,9 @@ include(":dexlineage", ":hookforge")
 listOf("knowledge", "jadx", "analysis", "migration", "cli").forEach {
     include(":dexlineage:$it")
 }
+// A separately compiled consumer of installed JARs; it is not a production module.
+include(":dexlineage:external-example")
+project(":dexlineage:external-example").projectDir = file("dexlineage/examples/external")
 if (androidEnabled) {
     include(":labs")
     include(":dexlineage:fixture-apk")

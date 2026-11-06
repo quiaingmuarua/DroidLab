@@ -1,7 +1,8 @@
 package dev.dexlineage.rules
 
 import dev.dexlineage.rules.facts.*
-import dev.dexlineage.rules.facts.DexFactSession.*
+import dev.dexlineage.rules.facts.ApkFacts.*
+import dev.dexlineage.rules.facts.DexMethod
 import jadx.api.plugins.input.data.ICodeReader
 import jadx.api.plugins.input.data.IMethodRef
 import jadx.api.plugins.input.data.ITry
@@ -112,7 +113,7 @@ class CallSlicesTest {
         assertTrue(slices.uncertainties.all { 4 in it.relevantCallOffsets.orEmpty() }, "Normal continuation is relevant even if the catch never calls the factory")
     }
 
-    private fun method(insns: List<InsnData>, tries: List<ITry> = emptyList()) = Method(MethodId("Lsample;", "dispatch", emptyList(), "Ljava/lang/Object;"), 8,
+    private fun method(insns: List<InsnData>, tries: List<ITry> = emptyList())  = DexMethod(MethodId("Lsample;", "dispatch", emptyList(), "Ljava/lang/Object;"), 8,
         proxy<ICodeReader> { name, args -> when (name) {
             "getArgsStartReg" -> -1; "getRegistersCount" -> 8; "getUnitsCount" -> 100; "getTries" -> tries
             "visitInstructions" -> { @Suppress("UNCHECKED_CAST") val consumer = args!![0] as Consumer<InsnData>; insns.forEach(consumer::accept); null }

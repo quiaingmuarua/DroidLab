@@ -77,7 +77,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = false
             // No signing configuration: these APKs are statically analyzed, never installed.
-            proguardFiles("fixture-rules.pro", "protobuf-fixture-rules.pro")
+            proguardFiles("fixture-rules.pro", "protobuf-fixture-rules.pro", "call-observation-rules.pro")
         }
     }
 }

@@ -12,8 +12,10 @@ import java.nio.file.Path
 class InRunResolutionSession internal constructor(
     private val artifact: Artifact,
     private val outputRoot: Path,
-    private val engineBuildId: String,
+    private val engine: ResolutionEngine,
 ) : AutoCloseable {
+    private val registry = engine.registry
+    private val engineBuildId = engine.buildId()
     private var facts: DexFactSession? = null
     private var renderer: ApkReader.EvidenceSession? = null
     private var closed = false
@@ -29,11 +31,11 @@ class InRunResolutionSession internal constructor(
                 available: Map<String, SupportAnchor> = emptyMap()): ResolutionBatch {
         requireInput(!closed, "Matching session is closed")
         val all = rules + anchorRules.values
-        all.forEach(StrategyRegistry::validate)
+        all.forEach(registry::validate)
         val producers = available.mapValues { it.value.rule } + evaluator.symbolRules + anchorRules
-        all.forEach { StrategyRegistry.validateDependencyDefinitions(it, producers) }
+        all.forEach { registry.validateDependencyDefinitions(it, producers) }
         val result = evaluator.execute(rules, anchorRules, available)
-        val current = factSession(all.flatMap { StrategyRegistry.literals(it) }.toSet(), emptySet())
+        val current = factSession(all.flatMap { registry.literals(it) }.toSet(), emptySet())
         Digests.verify(artifact)
         return ResolutionBatch(result.resolutions, current.scan, analysis(), result.waiting,
             artifacts.toList(), evaluator.resolvedAnchors.toSortedMap(), evaluator.evaluatedRules.toList())
@@ -75,8 +77,8 @@ class InRunResolutionSession internal constructor(
         code.values.sumOf { it.elapsedMillis }, unavailableOwners.toSet())
 
     private fun evaluate(rules: List<RuleRevision>, symbols: Map<String, SupportAnchor>): Map<String, Resolution> {
-        val dependencies = rules.associate { it.revisionId to StrategyRegistry.checkDependencies(it, artifact, symbols) }
-        val current = factSession(rules.flatMap { StrategyRegistry.literals(it) }.toSet(),
+        val dependencies = rules.associate { it.revisionId to registry.checkDependencies(it, artifact, symbols) }
+        val current = factSession(rules.flatMap { registry.literals(it) }.toSet(),
             dependencies.values.flatMap { it.values }.mapNotNull { it.binding.method }.toSet())
         dependencies.values.flatMap { it.values }.distinctBy { it.key }.forEach { dependency ->
             requireInput(current.classes[dependency.binding.owner.descriptor]?.ref == dependency.binding.owner,
@@ -88,16 +90,16 @@ class InRunResolutionSession internal constructor(
         if (builtin.isNotEmpty()) {
             val query = RuleEngine.queryWithScan(artifact, builtin.flatMap { it.locators }, outputRoot.resolve("work/fields"), current.scan)
             remember(query.analysis)
-            ResolutionEngine.resolveQuery(artifact, builtin, engineBuildId, query).forEach { (id, proof) ->
+            engine.resolveQuery(artifact, builtin, engineBuildId, query).forEach { (id, proof) ->
                 resolved[id] = proof
                 queries[id] = query.copy(matches = proof.matches)
             }
         }
         rules.filter { it.strategyId != "builtin.locators" }.forEach { rule ->
-            val result = StrategyRegistry.execute(current, rule, dependencies.getValue(rule.revisionId))
+            val result = registry.execute(current, rule, dependencies.getValue(rule.revisionId))
             val proof = RuleProofs.create(artifact.sha256, rule, engineBuildId, result.matches,
                 dependencies.getValue(rule.revisionId), result.unresolvedPaths.map { it.toWire() }).also(RuleProofs::validate)
-            val eagerOwners = if (StrategyRegistry.deferredEvidence(rule)) emptySet() else result.matches
+            val eagerOwners = if (registry.deferredEvidence(rule)) emptySet() else result.matches
                 .filter { it.status != MatchStatus.FAIL }
                 .flatMap { listOf(it.owner) + it.relatedRefs + it.trace.map { position -> position.owner } }
                 .map { it.descriptor }.toSet()
