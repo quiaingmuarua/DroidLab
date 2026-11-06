@@ -61,7 +61,7 @@ data class AnalysisRun(val schemaVersion: Int = SCHEMA_VERSION, val kind: String
     val identityReferences: List<IdentityReference>? = null, val methodArtifacts: List<ScenarioArtifactRef>? = null,
     val dependencyEvaluation: String? = null, val resolvedAnchors: Map<String, SupportAnchor>? = null,
     val evaluatedRules: List<String>? = null,
-    @Transient val compatibility: JsonObject? = null) {
+    @Transient val compatibility: JsonObject? = null, val anchorPublication: String? = null) {
     fun fingerprint(json: JsonCodec = JsonFiles): String = Digests.text(json.encode(copy(runId = "", createdAt = "", scan = scan.copy(elapsedMillis = 0),
         analysisMillis = 0, discovery = discovery?.copy(createdAt = "", scan = discovery.scan.copy(elapsedMillis = 0), analysisMillis = 0))))
 }

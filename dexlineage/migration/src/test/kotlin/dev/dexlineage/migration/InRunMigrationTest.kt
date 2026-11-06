@@ -27,7 +27,7 @@ class InRunMigrationTest {
     @TempDir lateinit var temp: Path
     private data class Fixture(val dir: Path, val run: MigrationRun)
 
-    private fun fixture(blocked: Boolean = false): Fixture {
+    private fun fixture(blocked: Boolean = false, retained: Boolean = false, historicalAnchor: Boolean = false): Fixture {
         val source = Digests.artifact(Files.writeString(temp.resolve("source-input"), "source fixture"))
         val target = Digests.artifact(Files.writeString(temp.resolve("target-input"), "target fixture"))
         val sourceRoot = Files.createDirectory(temp.resolve("source-package"))
@@ -39,7 +39,8 @@ class InRunMigrationTest {
             listOf(EvidenceFiles.export(sourceRoot, "old-run", oldRecord.evidenceId, sourceRoot)),
             "Old semantic responsibility", "fixture", oldProof.rule, oldProof)
         val knowledge = KnowledgeFiles.write(sourceRoot, VersionKnowledge(knowledgeId = "", artifact = source,
-            entries = listOf(entry), unresolved = emptyList(), provenance = "fixture"))
+            entries = listOf(entry), unresolved = emptyList(), provenance = "fixture",
+            anchors = if (historicalAnchor) listOf(SupportAnchor("context", oldProof.uniqueEntity!!, oldProof.rule, oldProof, entry.evidence)) else emptyList()))
         val rootRef = ClassRef(target.sha256, "Lcontext;", "classes.dex")
         val methodRef = ClassRef(target.sha256, "Lcontract;", "classes.dex")
         val owner = ClassRef(target.sha256, "Lx;", "classes.dex")
@@ -83,7 +84,8 @@ class InRunMigrationTest {
             anchorTasks = listOf(MigrationAnchorTask("context", rootRule, rootProof),
                 MigrationAnchorTask("name", methodRule, symbols["name"]?.resolution, if (blocked) listOf("context") else emptyList())),
             anchorOverrides = definitions.anchors, dependencyEvaluation = "in-run", resolvedAnchors = symbols,
-            evaluatedRules = if (blocked) listOf(rootRule.revisionId) else listOf(rootRule.revisionId, methodRule.revisionId, targetRule.revisionId))
+            evaluatedRules = if (blocked) listOf(rootRule.revisionId) else listOf(rootRule.revisionId, methodRule.revisionId, targetRule.revisionId),
+            anchorPublication = if (retained) "retained-v1" else null)
         run = run.copy(runId = run.fingerprint())
         JsonFiles.writeNew(dir.resolve("run.json"), run)
         EvidenceFiles.publish(dir, run.runId, source, listOf(original), listOf(DecompiledClass("La;", "class a {}", null, false, emptyList(), 0)))
@@ -142,5 +144,51 @@ class InRunMigrationTest {
         val ownerEvidence = f.run.resolvedAnchors!!.getValue("context").evidence.single()
         Files.writeString(f.dir.resolve(ownerEvidence.javaPath), "changed code")
         assertFailsWith<ValidationException> { service.readRun(f.dir) }
+    }
+
+    @Test fun `failed symbols survive publication and retry without promoting historical bindings`() {
+        val f = fixture(blocked = true, retained = true, historicalAnchor = true)
+        val out = temp.resolve("retained"); service.publish(f.dir, out)
+        val knowledge = KnowledgeFiles.read(out.resolve("knowledge.json"))
+        assertTrue(knowledge.anchors.isEmpty())
+        val pending = knowledge.unresolvedAnchors!!.associateBy { it.key }
+        assertEquals(setOf("context", "name"), pending.keys)
+        assertEquals(ResolutionStatus.NO_MATCH, pending.getValue("context").resolution!!.status)
+        assertEquals(f.run.knowledge.anchors.single(), pending.getValue("context").lastConfirmed)
+        assertEquals(f.run.knowledge.knowledgeId, pending.getValue("context").lastConfirmedKnowledgeId)
+        assertEquals(f.run.sourceApk.sha256, pending.getValue("context").lastConfirmed!!.binding.owner.apkSha256)
+        assertEquals(listOf("context"), pending.getValue("name").waitingFor)
+        assertNull(pending.getValue("name").resolution)
+        assertEquals(pending.mapValues { it.value.rule }, service.effectiveAnchorRules(knowledge, emptyList()))
+        assertEquals(pending.mapValues { it.value.rule }, service.effectiveAnchorRules(f.run.knowledge, emptyList(), knowledge))
+        assertEquals(1, KnowledgeFiles.evidenceClosure(knowledge).map { it.ref }.distinct().size)
+        val replay = temp.resolve("retained-replay"); service.publish(f.dir, replay, out.resolve("report.json"))
+        assertEquals(Files.readString(out.resolve("knowledge.json")), Files.readString(replay.resolve("knowledge.json")))
+        val historicalCode = pending.getValue("context").lastConfirmed!!.evidence.single()
+        Files.writeString(out.resolve(historicalCode.javaPath), "tampered history")
+        assertFailsWith<ValidationException> { KnowledgeFiles.read(out.resolve("knowledge.json")) }
+    }
+
+    @Test fun `failed new symbol attempt retains same APK confirmed binding and proof`() {
+        val f = fixture(retained = true)
+        val first = temp.resolve("first"); service.publish(f.dir, first)
+        val base = KnowledgeFiles.read(first.resolve("knowledge.json"))
+        val changedRoot = RuleProofs.revision(listOf(Locator("string-use", "changed lifecycle")))
+        val failed = RuleProofs.create(f.run.targetApk.sha256, changedRoot, f.run.engineBuildId, emptyList())
+        val overrides = f.run.anchorOverrides.map { if (it.key == "context") it.copy(locators = changedRoot.locators) else it }
+        val rulesPath = temp.resolve("retry-rules.json")
+        JsonFiles.writeNew(rulesPath, MigrationRulesFile(items = f.run.ruleOverrides, anchors = overrides))
+        val retry = Files.createDirectory(temp.resolve("retry"))
+        var run = f.run.copy(runId = "", targetBase = base, targetBaseFile = Digests.artifact(first.resolve("knowledge.json")),
+            rulesFile = Digests.artifact(rulesPath), anchorOverrides = overrides,
+            tasks = f.run.tasks.map { it.copy(resolution = null, waitingFor = listOf("name")) },
+            anchorTasks = f.run.anchorTasks.map { if (it.key == "context") it.copy(rule = changedRoot, resolution = failed) else it.copy(resolution = null, waitingFor = listOf("context")) },
+            resolvedAnchors = emptyMap(), evaluatedRules = listOf(changedRoot.revisionId))
+        run = run.copy(runId = run.fingerprint()); JsonFiles.writeNew(retry.resolve("run.json"), run)
+        val out = temp.resolve("retry-published"); service.publish(retry, out)
+        val continued = KnowledgeFiles.read(out.resolve("knowledge.json"))
+        assertEquals(base.anchors, continued.anchors)
+        assertTrue(continued.unresolvedAnchors!!.isEmpty())
+        assertEquals(failed, service.readRun(retry).anchorTasks.first().resolution)
     }
 }

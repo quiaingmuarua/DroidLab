@@ -6,11 +6,13 @@ const val JADX_VERSION = "1.5.0"
 
 data class Artifact(val path: String, val sha256: String)
 data class ClassRef(val apkSha256: String, val descriptor: String, val dexEntry: String)
-enum class EntityKind { CLASS, METHOD }
+enum class EntityKind { CLASS, METHOD, FIELD }
 data class MethodRef(val owner: ClassRef, val name: String, val descriptor: String)
-data class EntityRef(val owner: ClassRef, val method: MethodRef? = null) {
-    val kind: EntityKind get() = if (method == null) EntityKind.CLASS else EntityKind.METHOD
-    val identity: String get() = owner.descriptor + (method?.let { "->${it.name}${it.descriptor}" } ?: "")
+data class FieldRef(val owner: ClassRef, val name: String, val type: String)
+data class EntityRef(val owner: ClassRef, val method: MethodRef? = null, val field: FieldRef? = null) {
+    val kind: EntityKind get() = when { method != null -> EntityKind.METHOD; this.field != null -> EntityKind.FIELD; else -> EntityKind.CLASS }
+    val identity: String get() = owner.descriptor + (method?.let { "->${it.name}${it.descriptor}" }
+        ?: this.field?.let { "->${it.name}:${it.type}" } ?: "")
 }
 data class StringUseSite(val dexEntry: String, val classDescriptor: String, val methodDescriptor: String, val codeUnitOffset: Int, val fileOffset: Int, val literal: String)
 data class ScanStats(val classCount: Int, val methodCount: Long, val instructionCount: Long, val stringUseSites: Long, val elapsedMillis: Long, val diagnostics: List<String>)
@@ -41,7 +43,10 @@ data class FieldBinding(val owner: ClassRef, val fieldName: String, val fieldTyp
     val initializerMethod: String?, val call: CallFact?, val assignmentOwner: String?, val unknownReason: String? = null)
 data class MatchFact(val owner: ClassRef, val status: MatchStatus, val factors: List<FactorResult>, val captures: Map<String, String>,
     val field: FieldBinding? = null, val stringUses: List<StringUseSite> = emptyList(), val locatorIndex: Int = 0,
-    val method: MethodRef? = null, val relatedRefs: List<ClassRef> = emptyList(), val trace: List<FactTrace> = emptyList())
+    val method: MethodRef? = null, val relatedRefs: List<ClassRef> = emptyList(), val trace: List<FactTrace> = emptyList(),
+    val fieldRef: FieldRef? = null, val accessFlags: Int? = null) {
+    val entity: EntityRef get() = EntityRef(owner, method, fieldRef)
+}
 data class FactTrace(val owner: ClassRef, val methodDescriptor: String?, val codeUnitOffset: Int?, val kind: String, val detail: String)
 data class FieldAnalysis(val bindings: List<FieldBinding>, val code: List<DecompiledClass>, val diagnostics: List<String>, val elapsedMillis: Long,
     val unavailableOwners: Set<String> = emptySet())
@@ -66,8 +71,9 @@ data class RuleRevision(val revisionId: String = "", val locators: List<Locator>
     val strategyId: String = "builtin.locators", val parameters: com.google.gson.JsonObject = com.google.gson.JsonObject(),
     val resultKind: EntityKind = EntityKind.CLASS, val requires: Map<String, String> = emptyMap())
 enum class ResolutionStatus { UNIQUE, NO_MATCH, AMBIGUOUS, UNKNOWN }
-data class ResolutionCandidate(val ref: ClassRef, val status: MatchStatus, val matches: List<MatchFact>, val method: MethodRef? = null) {
-    val entity: EntityRef get() = EntityRef(ref, method)
+data class ResolutionCandidate(val ref: ClassRef, val status: MatchStatus, val matches: List<MatchFact>, val method: MethodRef? = null,
+    val fieldRef: FieldRef? = null) {
+    val entity: EntityRef get() = EntityRef(ref, method, fieldRef)
 }
 data class Resolution(val schemaVersion: Int = SCHEMA_VERSION, val resolutionId: String,
     val apkSha256: String, val rule: RuleRevision, val engineVersion: String = TOOL_VERSION,
@@ -77,6 +83,11 @@ data class Resolution(val schemaVersion: Int = SCHEMA_VERSION, val resolutionId:
     val uniqueEntity: EntityRef? get() = if (status == ResolutionStatus.UNIQUE) candidates.single().entity else null
     val uniqueRef: ClassRef? get() = uniqueEntity?.takeIf { it.kind == EntityKind.CLASS }?.owner
     val uniqueMethod: MethodRef? get() = uniqueEntity?.method
+    val uniqueField: FieldRef? get() = uniqueEntity?.field
+    val uniqueAccessFlags: Int? get() = uniqueEntity?.let { entity ->
+        matches.filter { it.entity == entity && it.status == MatchStatus.PASS }.map { it.accessFlags }
+            .takeIf { it.isNotEmpty() && it.all { flags -> flags != null } }?.distinct()?.singleOrNull()
+    }
 }
 data class ResolutionBatch(val resolutions: Map<String, Resolution>, val scan: ScanResult, val analysis: FieldAnalysis?,
     val waiting: Map<String, List<String>> = emptyMap(), val artifacts: List<ScenarioArtifactRef> = emptyList(),
@@ -91,10 +102,14 @@ data class SupportAnchor(val key: String, val binding: EntityRef, val rule: Rule
     val evidence: List<KnowledgeEvidence> = emptyList())
 /** Last confirmed knowledge, never a guessed binding to the current APK. */
 data class UnresolvedKnowledge(val entry: KnowledgeEntry, val sourceKnowledgeId: String, val reason: String, val originRun: String)
+/** An unsuccessful current attempt; a last-confirmed binding is historical only. */
+data class UnresolvedAnchor(val key: String, val rule: RuleRevision, val resolution: Resolution?,
+    val waitingFor: List<String>, val evidence: List<KnowledgeEvidence>, val lastConfirmed: SupportAnchor?,
+    val lastConfirmedKnowledgeId: String?, val originRun: String)
 data class VersionKnowledge(val schemaVersion: Int = SCHEMA_VERSION, val kind: String = "version-knowledge", val knowledgeId: String,
     val artifact: Artifact, val entries: List<KnowledgeEntry>, val unresolved: List<UnresolvedKnowledge>, val provenance: String,
     val parentKnowledgeId: String? = null, val anchors: List<SupportAnchor> = emptyList(),
-    val migrationSourceKnowledgeId: String? = null)
+    val migrationSourceKnowledgeId: String? = null, val unresolvedAnchors: List<UnresolvedAnchor>? = null)
 
 /** Mechanical journal only; scenario owners interpret payloads and decide state. */
 data class StoredReview(val schemaVersion: Int = SCHEMA_VERSION, val revisionId: String, val runId: String, val taskId: String,

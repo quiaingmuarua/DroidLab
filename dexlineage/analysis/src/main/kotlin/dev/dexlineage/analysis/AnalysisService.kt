@@ -9,6 +9,7 @@ import dev.dexlineage.model.*
 import dev.dexlineage.rules.InRunResolutionSession
 import dev.dexlineage.rules.RuleEngine
 import dev.dexlineage.rules.RuleJson
+import dev.dexlineage.rules.facts.OriginalEntities
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -157,6 +158,7 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
         if (session == null) createNewDirectory(runDir)
         else requireInput(Files.isDirectory(runDir) && !Files.exists(runDir.resolve("run.json")), "Analysis output already has a completed run")
         try {
+            OriginalEntities.validate(apk, base?.anchors.orEmpty().map { it.binding })
             val executing = revisions.filterKeys { it !in inherited }.values.toList()
             val batch = if (session == null) engine.openSession(apk, runDir).use { it.execute(executing, anchorRules, available) }
                         else session.execute(executing, anchorRules, available)
@@ -179,12 +181,12 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
                 classInventory = batch.scan.classes.toSortedMap(), tasks = tasks, scan = batch.scan.stats,
                 analysisDiagnostics = batch.analysis?.diagnostics.orEmpty(), analysisMillis = batch.analysis?.elapsedMillis ?: 0, createdAt = Instant.now().toString(),
                 anchorTasks = anchorTasks, corpusFile = corpusFile, corpus = corpus, identityReferences = references, methodArtifacts = AnalysisMethods.copyArtifacts(batch.artifacts, runDir),
-                dependencyEvaluation = "in-run", resolvedAnchors = batch.resolvedAnchors, evaluatedRules = batch.evaluatedRules)
+                dependencyEvaluation = "in-run", resolvedAnchors = batch.resolvedAnchors, evaluatedRules = batch.evaluatedRules, anchorPublication = "retained-v1")
             run = run.copy(runId = run.fingerprint(json))
             batch.analysis?.code?.takeIf { it.isNotEmpty() }?.let { code ->
                 EvidenceFiles.publish(runDir, run.runId, apk, code.map { ClassRef(apk.sha256, it.descriptor, run.classInventory.getValue(it.descriptor)) }, code)
             }
-            val anchorRefs = anchorTasks.mapNotNull { it.resolution }.filter { it.status == ResolutionStatus.UNIQUE }.flatMap { anchorRefs(run, it) }.toSet()
+            val anchorRefs = anchorTasks.mapNotNull { it.resolution }.flatMap { anchorRefs(run, it) }.toSet()
             ensureEvidence(runDir, run, anchorRefs)
             listOfNotNull(apk, rulesFile, discoveryFile, baseFile, corpusFile).forEach(Digests::verify)
             IdentityReferences.verifyFiles(references)
@@ -232,6 +234,7 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
         val run = this.json.read(dir.resolve("run.json"), AnalysisRun::class.java)
         requireInput(run.kind == "analysis-run" && run.toolVersion == TOOL_VERSION && run.jadxVersion == JADX_VERSION, "Unsupported Analysis run")
         requireInput(run.runId == run.fingerprint(json), "Analysis run fingerprint mismatch")
+        requireInput(run.anchorPublication == null || run.anchorPublication == "retained-v1", "Unknown anchor publication mode")
         requireInput(run.engineBuildId.isNotBlank(), "Missing Analysis engine build identity")
         requireInput(run.scan.diagnostics.isEmpty(), "Incomplete Analysis scan")
         validateRules(run.rules)
@@ -387,10 +390,13 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
         val latest = reviewSnapshot?.let { ReviewStore.fromSnapshot(dir, run.runId, it) } ?: ReviewStore.latest(dir, run.runId)
         val decisions = decisions(dir, run, latest)
         val accepted = decisions.filter { it.state == TaskState.ACCEPTED && run.tasks.single { task -> task.taskId == it.taskId }.executionState != AnalysisExecutionState.INHERITED }
+        if (run.anchorPublication == "retained-v1")
+            ensureEvidence(dir, run, run.anchorTasks.mapNotNull { it.resolution }.flatMap { anchorRefs(run, it) }.toSet())
         createNewDirectory(out)
         val entries = run.baseKnowledge?.entries.orEmpty().associateBy { it.semanticId }.toMutableMap()
         val pending = run.baseKnowledge?.unresolved.orEmpty().associateBy { it.entry.semanticId }.toMutableMap()
         val anchors = run.baseKnowledge?.anchors.orEmpty().associateBy { it.key }.toMutableMap()
+        val unresolvedAnchors = run.baseKnowledge?.unresolvedAnchors.orEmpty().associateBy { it.key }.toMutableMap()
         val updatedIds = accepted.map { it.semanticId!! }.toSet()
         run.baseFile?.let { baseFile ->
             val sourceRoot = Path.of(baseFile.path).parent
@@ -409,6 +415,21 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
                 anchors[task.key] = SupportAnchor(task.key, proof.uniqueEntity!!, task.rule, proof, evidence)
             }
         }
+        if (run.anchorPublication == "retained-v1") {
+            run.anchorTasks.forEach { task ->
+                if (task.key in anchors) unresolvedAnchors.remove(task.key)
+                else {
+                    val previous = unresolvedAnchors[task.key]
+                    val evidence = task.resolution?.let { proof ->
+                        DependencyEvidence.copy(proof, listOfNotNull(dir, run.baseFile?.let { Path.of(it.path).parent }), out)
+                        anchorRefs(run, proof).sortedBy { it.descriptor }.map { EvidenceFiles.export(dir, run.runId, Identities.evidenceId(run.runId, it), out) }
+                    }.orEmpty()
+                    previous?.lastConfirmed?.let { KnowledgeFiles.copyAnchor(Path.of(run.baseFile!!.path).parent, out, it) }
+                    unresolvedAnchors[task.key] = UnresolvedAnchor(task.key, task.rule, task.resolution, task.waitingFor, evidence,
+                        previous?.lastConfirmed, previous?.lastConfirmedKnowledgeId, run.runId)
+                }
+            }
+        }
         accepted.forEach { decision ->
             val task = run.tasks.single { it.taskId == decision.taskId }
             val review = decision.review!!
@@ -422,7 +443,8 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
         }
         val knowledge = KnowledgeFiles.write(out, VersionKnowledge(knowledgeId = "", artifact = run.apk,
             entries = entries.values.toList(), unresolved = pending.values.toList(), provenance = "analysis:${run.runId}", parentKnowledgeId = run.baseKnowledge?.knowledgeId,
-            anchors = anchors.values.toList(), migrationSourceKnowledgeId = run.baseKnowledge?.migrationSourceKnowledgeId))
+            anchors = anchors.values.toList(), migrationSourceKnowledgeId = run.baseKnowledge?.migrationSourceKnowledgeId,
+            unresolvedAnchors = unresolvedAnchors.values.toList().takeIf { run.anchorPublication == "retained-v1" }))
         MappingOutput.write(out.resolve("mapping.tiny"), knowledge.entries.map { AcceptedRename(it.binding.descriptor, Identities.renamedFullName(it.binding.descriptor, it.name)) })
         val methodArtifacts = if (run.discovery?.waitingFor.orEmpty().isEmpty()) methods.forRun(run).publicationArtifacts(run, decisions, out) else emptyList()
         val packageRoot = out.toAbsolutePath().normalize()
@@ -439,6 +461,7 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
             "resolutionCounts" to ResolutionStatus.entries.associateWith { status -> run.tasks.count { it.resolution?.status == status } },
             "executionCounts" to run.tasks.groupingBy { it.executionState }.eachCount(), "anchorTasks" to run.anchorTasks,
             "dependencyEvaluation" to run.dependencyEvaluation, "evaluatedRules" to run.evaluatedRules,
+            "anchorPublication" to run.anchorPublication, "unresolvedAnchors" to knowledge.unresolvedAnchors?.size,
             "corpusId" to run.corpus?.corpusId, "corpusTargets" to run.corpus?.let { corpusViews(it, run, decisions) },
             "carriedConfirmed" to (knowledge.entries.size - accepted.size), "unresolved" to knowledge.unresolved.size,
             "identityReferences" to run.identityReferences?.map { reference -> mapOf("knowledgeId" to reference.knowledge.knowledgeId,
@@ -492,8 +515,9 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
         discovery
     }
 
-    private fun anchorRules(rules: AnalysisRuleFile, base: VersionKnowledge?): Map<String, RuleRevision> =
-        (base?.anchors.orEmpty().associate { it.key to it.rule } + rules.anchors.associate { it.key to RuleProofs.revision(it.locators, it.strategy) }).toSortedMap()
+    internal fun anchorRules(rules: AnalysisRuleFile, base: VersionKnowledge?): Map<String, RuleRevision> =
+        (base?.unresolvedAnchors.orEmpty().associate { it.key to it.rule } + base?.anchors.orEmpty().associate { it.key to it.rule } +
+            rules.anchors.associate { it.key to RuleProofs.revision(it.locators, it.strategy) }).toSortedMap()
 
     private fun validateDependencies(definitions: Map<String, RuleRevision>, targets: List<RuleRevision>, available: Collection<SupportAnchor>) {
         RuleProofs.validateDependencies(definitions, targets, available)
@@ -547,6 +571,7 @@ class AnalysisService(val runtime: AnalysisRuntime = AnalysisRuntime()) {
     }
 
     private fun anchorRefs(run: AnalysisRun, proof: Resolution): Set<ClassRef> = buildSet {
+        if (run.anchorPublication == "retained-v1") addAll(KnowledgeFiles.proofRefs(proof))
         addAll(proof.candidates.map { it.ref })
         addAll(AnalysisPolicy.proofRefs(proof))
         proof.matches.mapNotNull { it.field?.call?.declaringType }.distinct().forEach { descriptor ->

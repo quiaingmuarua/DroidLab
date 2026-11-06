@@ -8,6 +8,7 @@ import dev.dexlineage.model.*
 import dev.dexlineage.rules.RuleEngine
 import dev.dexlineage.rules.ResolutionEngine
 import dev.dexlineage.rules.RuleJson
+import dev.dexlineage.rules.facts.OriginalEntities
 import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Path
@@ -47,6 +48,8 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
             requireScan(sourceScan)
             orderedEntries.forEach { requireInput(sourceScan.classes[it.binding.descriptor] == it.binding.dexEntry, "Source binding absent from source APK: ${it.semanticId}") }
             knowledge.anchors.forEach { requireInput(sourceScan.classes[it.binding.owner.descriptor] == it.binding.owner.dexEntry, "Source anchor absent from source APK: ${it.key}") }
+            OriginalEntities.validate(source, knowledge.anchors.map { it.binding })
+            OriginalEntities.validate(target, targetBase?.anchors.orEmpty().map { it.binding })
             val executing = rules.filterKeys { it !in inheritedEntries }.values + anchorRules.filterKeys { it !in inheritedAnchors }.values
             val query = engine.openSession(target, runDir).use { session ->
                 session.execute(executing.toList(), anchorRules, available)
@@ -74,7 +77,7 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
                 createdAt = Instant.now().toString(), rulesFile = rulesFile, ruleOverrides = overrides.sortedBy { it.semanticId }, engineBuildId = engine.buildId(),
                 targetBaseFile = targetBaseFile, targetBase = targetBase, anchorTasks = anchorTasks, anchorOverrides = definitions.anchors.sortedBy { it.key },
                 methodArtifacts = MigrationArtifacts.copy(artifacts, runDir).takeIf { it.isNotEmpty() }, methodArtifactSource = artifactSource,
-                dependencyEvaluation = "in-run", resolvedAnchors = query.resolvedAnchors, evaluatedRules = query.evaluatedRules)
+                dependencyEvaluation = "in-run", resolvedAnchors = query.resolvedAnchors, evaluatedRules = query.evaluatedRules, anchorPublication = "retained-v1")
             run = run.copy(runId = run.fingerprint(json))
             query.analysis?.code?.let { code ->
                 val refs = code.mapNotNull { c -> run.targetInventory[c.descriptor]?.let { ClassRef(target.sha256, c.descriptor, it) } }
@@ -92,6 +95,7 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
         val run = this.json.read(dir.resolve("run.json"), MigrationRun::class.java)
         requireInput(run.kind == "migration-run" && run.toolVersion == TOOL_VERSION && run.jadxVersion == JADX_VERSION, "Unsupported migration run")
         requireInput(run.runId == run.fingerprint(json), "Migration run fingerprint mismatch")
+        requireInput(run.anchorPublication == null || run.anchorPublication == "retained-v1", "Unknown anchor publication mode")
         MigrationArtifacts.verify(run.methodArtifacts.orEmpty())
         run.methodArtifactSource?.let { source ->
             requireInput(run.targetBaseFile != null && Path.of(source.path) == Path.of(run.targetBaseFile.path).parent.resolve("report.json"), "Inherited artifact report is not the target base report")
@@ -275,6 +279,10 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
         val targetBaseRoot = run.targetBaseFile?.let { Path.of(it.path).parent }
         KnowledgeFiles.read(Path.of(run.knowledgeFile.path))
         val exportableAnchors = run.anchorTasks.filter { it.resolution?.status == ResolutionStatus.UNIQUE && it.inheritedAnchor == null }
+        if (run.anchorPublication == "retained-v1") {
+            ensureTargetEvidence(dir, run, run.anchorTasks.filter { it.resolution?.status != ResolutionStatus.UNIQUE }
+                .flatMap { it.resolution?.let { proof -> proofRefs(proof, run.targetInventory, true) }.orEmpty() }.toSet())
+        }
         if (run.dependencyEvaluation == null) {
             ensureTargetEvidence(dir, run, exportableAnchors.flatMap { proofRefs(it.resolution!!, run.targetInventory) }.toSet())
         }
@@ -315,9 +323,28 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
                 anchors[task.key] = SupportAnchor(task.key, proof.uniqueEntity!!, task.rule, proof, evidence)
             }
         }
+        val unresolvedAnchors = if (run.anchorPublication == "retained-v1") run.anchorTasks.filter { it.key !in anchors }.map { task ->
+            val priorPending = run.targetBase?.unresolvedAnchors?.singleOrNull { it.key == task.key }
+            val sourceAnchor = run.knowledge.anchors.singleOrNull { it.key == task.key }
+            val sourcePending = run.knowledge.unresolvedAnchors?.singleOrNull { it.key == task.key }
+            val historical = priorPending?.lastConfirmed ?: sourceAnchor ?: sourcePending?.lastConfirmed
+            val historicalId = when {
+                priorPending?.lastConfirmed != null -> priorPending.lastConfirmedKnowledgeId
+                sourceAnchor != null -> run.knowledge.knowledgeId
+                else -> sourcePending?.lastConfirmedKnowledgeId
+            }
+            historical?.let { KnowledgeFiles.copyAnchor(if (priorPending?.lastConfirmed != null) targetBaseRoot!! else sourceRoot, out, it) }
+            val evidence = task.resolution?.let { proof ->
+                copyDependencies(proof, dir, run, out)
+                proofRefs(proof, run.targetInventory, true).sortedBy { it.descriptor }.map {
+                    EvidenceFiles.export(dir, run.runId, Identities.evidenceId(run.runId, it), out)
+                }
+            }.orEmpty()
+            UnresolvedAnchor(task.key, task.rule, task.resolution, task.waitingFor, evidence, historical, historicalId, run.runId)
+        } else null
         val knowledge = KnowledgeFiles.write(out, VersionKnowledge(knowledgeId = "", artifact = run.targetApk, entries = entries.values.toList(), unresolved = unresolved,
             provenance = "migration:${run.runId}", parentKnowledgeId = run.targetBase?.knowledgeId ?: run.knowledge.knowledgeId,
-            anchors = anchors.values.toList(), migrationSourceKnowledgeId = run.knowledge.knowledgeId))
+            anchors = anchors.values.toList(), migrationSourceKnowledgeId = run.knowledge.knowledgeId, unresolvedAnchors = unresolvedAnchors))
         MappingOutput.write(out.resolve("mapping.tiny"), knowledge.entries.map { AcceptedRename(it.binding.descriptor, Identities.renamedFullName(it.binding.descriptor, it.name)) })
         val methodArtifacts = MigrationArtifacts.copy(run.methodArtifacts.orEmpty(), out).map { ref ->
             ref.copy(path = out.toAbsolutePath().normalize().relativize(Path.of(ref.path)).toString().replace('\\', '/'))
@@ -337,6 +364,7 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
             "methodArtifactSource" to run.methodArtifactSource,
             "engineBuildId" to run.engineBuildId, "rulesFile" to run.rulesFile, "ruleOverrides" to run.ruleOverrides,
             "dependencyEvaluation" to run.dependencyEvaluation, "evaluatedRules" to run.evaluatedRules,
+            "anchorPublication" to run.anchorPublication, "unresolvedAnchors" to knowledge.unresolvedAnchors?.size,
             "targetBaseFile" to run.targetBaseFile, "targetBaseKnowledgeId" to run.targetBase?.knowledgeId, "anchors" to run.anchorTasks,
             "anchorOverrides" to run.anchorOverrides, "resolvedAnchors" to knowledge.anchors.size,
             "resolutions" to ResolutionStatus.entries.associateWith { state -> run.tasks.count { it.resolution?.status == state } },
@@ -416,12 +444,12 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
     }
     internal fun effectiveAnchorRules(knowledge: VersionKnowledge, overrides: List<MigrationAnchorOverride>, targetBase: VersionKnowledge? = null): Map<String, RuleRevision> = checkedInput("migration anchor definitions") {
         requireInput(overrides.map { it.key }.distinct().size == overrides.size, "Duplicate anchor override keys")
-        val original = knowledge.anchors.associateBy { it.key }
-        val base = targetBase?.anchors.orEmpty().associateBy { it.key }
-        val rules = (original.mapValues { it.value.rule } + base.mapValues { it.value.rule }).toMutableMap()
+        val original = knowledge.unresolvedAnchors.orEmpty().associate { it.key to it.rule } + knowledge.anchors.associate { it.key to it.rule }
+        val base = targetBase?.unresolvedAnchors.orEmpty().associate { it.key to it.rule } + targetBase?.anchors.orEmpty().associate { it.key to it.rule }
+        val rules = (original + base).toMutableMap()
         overrides.forEach { change ->
             requireInput(change.key.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")), "Invalid anchor key")
-            requireInput(change.expectedRevision == null || change.expectedRevision == (original[change.key]?.rule ?: base[change.key]?.rule)?.revisionId, "Anchor expectedRevision differs from frozen source")
+            requireInput(change.expectedRevision == null || change.expectedRevision == (original[change.key] ?: base[change.key])?.revisionId, "Anchor expectedRevision differs from frozen source")
             rules[change.key] = RuleProofs.revision(change.locators, change.strategy)
         }
         rules.values.forEach(registry::validate)
@@ -475,7 +503,8 @@ class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val js
         }
     }
 
-    private fun proofRefs(proof: Resolution, inventory: Map<String, String>): Set<ClassRef> = buildSet {
+    private fun proofRefs(proof: Resolution, inventory: Map<String, String>, allFacts: Boolean = false): Set<ClassRef> = buildSet {
+        if (allFacts) addAll(KnowledgeFiles.proofRefs(proof))
         proof.candidates.forEach { add(it.ref); addAll(it.matches.flatMap { m -> m.relatedRefs + m.trace.map { it.owner } }) }
         addAll(KnowledgeFiles.evidenceClosure(proof).map { it.ref })
         proof.dependencies.values.forEach { add(it.binding.owner) }

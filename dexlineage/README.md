@@ -182,7 +182,7 @@ Review batches save atomically. Identical resubmission is idempotent; replacing 
 
 Every publication uses a new directory containing:
 
-- `knowledge.json`: schema 4, class bindings, supporting anchors, active rules, dependency proofs, parent knowledge reference, review provenance and unresolved history.
+- `knowledge.json`: schema 4, class bindings, keyed CLASS/METHOD/FIELD anchors, active rules, dependency proofs, parent knowledge reference, review provenance and unresolved history. New runs retain failed symbol keys in `unresolvedAnchors`; historical bindings remain separate from current results.
 - `mapping.tiny`: class-only Tiny v2 `obfuscated` → `named` mappings.
 - `report.json`: task outcomes, active rules, diagnostics and published review revisions.
 - `evidence/` and `dependency-evidence/`: required review and symbol-proof Java/Smali with content hashes.

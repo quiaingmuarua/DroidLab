@@ -46,6 +46,7 @@ data class MigrationRun(
     val dependencyEvaluation: String? = null,
     val resolvedAnchors: Map<String, SupportAnchor>? = null,
     val evaluatedRules: List<String>? = null,
+    val anchorPublication: String? = null,
 ) {
     fun fingerprint(json: JsonCodec = JsonFiles): String = Digests.text(json.encode(copy(runId = "", createdAt = "",
         sourceScan = sourceScan.copy(elapsedMillis = 0), targetScan = targetScan.copy(elapsedMillis = 0), analysisMillis = 0)))

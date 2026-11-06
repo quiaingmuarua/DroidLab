@@ -68,4 +68,14 @@ class PublishedKnowledgeDexCheckTest {
         assertNotEquals(clazz.descriptor, facts.entries.single().clazz.descriptor)
         // The caller's source-authored oracle, rather than this address consumer, judges semantic correctness.
     }
+
+    @Test fun `field lookup requires exact name type owner and dex entry`() {
+        val sample = knowledge(anchorMethod = MethodRef(owner, "b", "(I)Ljava/lang/String;"))
+        fun field(ref: FieldRef): VersionKnowledge = sample.copy(anchors = listOf(sample.anchors.single().copy(binding = EntityRef(owner, field = ref))))
+        val ref = FieldRef(owner, "c", "I")
+        assertEquals(RawDexField("c", "I", 10), PublishedKnowledgeDexCheck.verify(index, field(ref)).anchors.single().field)
+        for (wrong in listOf(ref.copy(name = "missing"), ref.copy(type = "J"), ref.copy(owner = owner.copy(dexEntry = "classes.dex")))) {
+            assertFailsWith<IllegalArgumentException> { PublishedKnowledgeDexCheck.verify(index, field(wrong)) }
+        }
+    }
 }

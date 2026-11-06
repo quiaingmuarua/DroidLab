@@ -2,8 +2,10 @@ package dev.dexlineage.cli
 
 import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.KnowledgeFiles
+import dev.dexlineage.knowledge.SymbolBindings
 import dev.dexlineage.mapping.MappingOutput
 import dev.dexlineage.model.*
+import dev.dexlineage.rules.facts.OriginalEntities
 import java.nio.file.Path
 import kotlin.system.exitProcess
 
@@ -24,6 +26,7 @@ private const val HELP = """DexLineage 0.4.0
   migration submit   --run <directory> --review <review-batch.json>
   migration publish  --run <directory> --out <new-directory> [--at <previous-report.json>]
   knowledge verify   --knowledge <knowledge.json> --apk <apk> --work <directory>
+  knowledge export-symbols --knowledge <knowledge.json> --keys <keys.json> --out <new-file.json>
   knowledge import-s1 --output <S1-output-directory> --run <S1-run-directory> --out <new-directory>
   knowledge import-v02 --knowledge <v02-knowledge.json> --apk <apk> --out <new-directory>
   knowledge import-v03 --knowledge <v03-knowledge.json> --apk <apk> --out <new-directory> [--history <manifest.json>]
@@ -56,6 +59,7 @@ fun runCli(args: Array<String>, runtime: DexLineageRuntime = DexLineageRuntime()
                 "analysis publish", "migration publish" -> setOf("--run", "--out", "--at")
                 "migration prepare" -> setOf("--knowledge", "--source-apk", "--target-apk", "--run", "--min-confidence", "--rules", "--target-base")
                 "knowledge verify" -> setOf("--knowledge", "--apk", "--work")
+                "knowledge export-symbols" -> setOf("--knowledge", "--keys", "--out")
                 "knowledge import-s1" -> setOf("--output", "--run", "--out")
                 "knowledge import-v02" -> setOf("--knowledge", "--apk", "--out")
                 "knowledge import-v03" -> setOf("--knowledge", "--apk", "--out", "--history")
@@ -128,9 +132,12 @@ fun runCli(args: Array<String>, runtime: DexLineageRuntime = DexLineageRuntime()
                 "knowledge verify" -> {
                     val knowledge = KnowledgeFiles.read(path("--knowledge"))
                     requireInput(Digests.file(path("--apk")) == knowledge.artifact.sha256, "Knowledge APK SHA-256 mismatch")
+                    OriginalEntities.validate(Digests.artifact(path("--apk")),
+                        knowledge.entries.map { EntityRef(it.binding) } + knowledge.anchors.map { it.binding })
                     val renames = knowledge.entries.map { AcceptedRename(it.binding.descriptor, Identities.renamedFullName(it.binding.descriptor, it.name)) }
                     MappingOutput.verify(path("--apk"), path("--knowledge").toAbsolutePath().parent.resolve("mapping.tiny"), renames, path("--work"))
                 }
+                "knowledge export-symbols" -> SymbolBindings.export(path("--knowledge"), path("--keys"), path("--out"))
                 "knowledge import-v02" -> runtime.v02Importer.importKnowledge(path("--knowledge"), path("--apk"), path("--out")).let {
                     mapOf("knowledgeId" to it.knowledgeId, "confirmed" to it.entries.size, "unresolved" to it.unresolved.size, "output" to path("--out").toAbsolutePath().toString())
                 }

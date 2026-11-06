@@ -2,6 +2,7 @@ package dev.dexlineage.knowledge
 
 import com.google.gson.JsonObject
 import dev.dexlineage.io.ValidationException
+import dev.dexlineage.io.JsonFiles
 import dev.dexlineage.model.*
 import org.junit.jupiter.api.Test
 import kotlin.test.*
@@ -54,5 +55,40 @@ class AnchorProofTest {
         assertEquals(RuleProofs.revision(emptyList(), strategy.copy(parameters = a)), RuleProofs.revision(emptyList(), strategy.copy(parameters = b)))
         b.addProperty("one", 3)
         assertNotEquals(RuleProofs.revision(emptyList(), strategy.copy(parameters = a)), RuleProofs.revision(emptyList(), strategy.copy(parameters = b)))
+    }
+
+    @Test fun `fields retain exact name type and owner identities`() {
+        val rule = RuleProofs.revision(emptyList(), StrategySpec("example.field", resultKind = EntityKind.FIELD))
+        fun field(name: String, type: String = "I", status: MatchStatus = MatchStatus.PASS) = MatchFact(owner, status,
+            listOf(FactorResult("field", status, "Observed field")), emptyMap(), fieldRef = FieldRef(owner, name, type), accessFlags = 1)
+        val unique = RuleProofs.create(owner.apkSha256, rule, "engine", listOf(field("a"), field("a")))
+        assertEquals(EntityKind.FIELD, unique.uniqueEntity!!.kind)
+        assertEquals(FieldRef(owner, "a", "I"), unique.uniqueField)
+        assertNull(unique.uniqueRef)
+        assertEquals(1, unique.uniqueAccessFlags)
+        RuleProofs.validate(unique)
+        for (other in listOf(field("b"), field("a", "J"))) {
+            assertEquals(ResolutionStatus.AMBIGUOUS, RuleProofs.create(owner.apkSha256, rule, "engine", listOf(field("a"), other)).status)
+        }
+        assertEquals(ResolutionStatus.UNKNOWN, RuleProofs.create(owner.apkSha256, rule, "engine",
+            listOf(field("a"), field("b", status = MatchStatus.UNKNOWN))).status)
+        assertFailsWith<ValidationException> { RuleProofs.create(owner.apkSha256, rule, "engine", listOf(field("a"), field("a").copy(accessFlags = 9))) }
+        for (type in listOf("V", "[V", "", "Igarbage")) {
+            assertFailsWith<ValidationException> { RuleProofs.create(owner.apkSha256, rule, "engine", listOf(field("a", type))) }
+        }
+        assertFailsWith<ValidationException> { RuleProofs.validateEntity(EntityRef(owner, fact("a").method, FieldRef(owner, "a", "I"))) }
+        assertFailsWith<ValidationException> { RuleProofs.validateEntity(EntityRef(owner, field = FieldRef(owner.copy(dexEntry = "classes2.dex"), "a", "I"))) }
+    }
+
+    @Test fun `legacy method proof encodes without new nullable fields`() {
+        val rule = RuleProofs.revision(emptyList(), strategy)
+        val proof = RuleProofs.create(owner.apkSha256, rule, "engine", listOf(fact("a")))
+        val bytes = JsonFiles.encode(proof)
+        assertFalse(bytes.contains("fieldRef"))
+        assertFalse(bytes.contains("accessFlags"))
+        val parsed = JsonFiles.gson.fromJson(bytes, Resolution::class.java)
+        assertEquals(bytes, JsonFiles.encode(parsed))
+        assertEquals(proof.resolutionId, RuleProofs.id(parsed))
+        RuleProofs.validate(parsed)
     }
 }

@@ -10,6 +10,7 @@ import dev.dexlineage.model.ScanStats
 import dev.dexlineage.model.StringUseSite
 import jadx.api.JadxArgs
 import jadx.api.JadxDecompiler
+import jadx.api.JavaClass
 import jadx.api.plugins.JadxPlugin
 import jadx.api.plugins.loader.JadxPluginLoader
 import jadx.api.plugins.input.insns.Opcode
@@ -137,6 +138,7 @@ object ApkReader {
     internal class EvidenceSession(private val apk: Path, workDir: Path) : AutoCloseable {
         private val jadx: JadxDecompiler
         private val loadErrors: Int
+        private val originalClasses: Map<String, JavaClass>
         private val cache = sortedMapOf<String, DecompiledClass>()
         init {
             requireInput(Files.isRegularFile(apk), "Missing APK: $apk")
@@ -161,6 +163,11 @@ object ApkReader {
                 jadx.addCustomCodeLoader(DexInputPlugin().loadFiles(listOf(apk.toAbsolutePath())))
                 jadx.load()
                 loadErrors = jadx.errorsCount
+                // JADX's original full name uses Outer.Inner for nested classes;
+                // DEX identity uses the unchanged binary raw name Outer$Inner.
+                val classes = jadx.classesWithInners.groupBy { it.rawName }
+                requireInput(classes.values.all { it.size == 1 }, "JADX contains duplicate original class identities")
+                originalClasses = classes.mapValues { it.value.single() }
             } catch (e: Exception) {
                 jadx.close()
                 throw ExecutionException("Cannot load class evidence from $apk: ${errorText(e)}", e)
@@ -171,7 +178,7 @@ object ApkReader {
             try {
                 return descriptors.sorted().map { descriptor -> cache.getOrPut(descriptor) {
                     val expectedRaw = Identities.rawName(descriptor)
-                    val cls = jadx.searchJavaClassByOrigFullName(expectedRaw)
+                    val cls = originalClasses[expectedRaw]
                         ?: throw ExecutionException("JADX could not resolve original class $descriptor in $apk")
                     if (cls.rawName != expectedRaw) {
                         throw ExecutionException("JADX resolved $descriptor to a different original name: ${cls.rawName}")

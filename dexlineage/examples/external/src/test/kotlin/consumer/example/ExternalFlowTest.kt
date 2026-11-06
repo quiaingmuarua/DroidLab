@@ -31,12 +31,22 @@ class ExternalFlowTest {
             val line = Files.readAllLines(mapping).single { it.startsWith("dev.dexlineage.fixture.external.Shapes\$Product -> ") }
             return "L" + line.substringAfter(" -> ").removeSuffix(":").replace('.', '/') + ";"
         }
+        fun expectedField(version: String): String {
+            val lines = Files.readAllLines(fixtures.parent.resolve("outputs/mapping/${version}Release/mapping.txt"))
+            val owner = lines.indexOfFirst { it.startsWith("dev.dexlineage.fixture.external.Shapes\$Product -> ") }
+            assertTrue(owner >= 0)
+            return lines.drop(owner + 1).takeWhile { it.startsWith(" ") || it.startsWith("#") }
+                .single { it.trim().startsWith("int value -> ") }.substringAfter(" -> ").trim()
+        }
         fun strategy(anchor: String) = StrategySpec("example.constructed-class", resultKind = EntityKind.CLASS,
             requires = mapOf("factory" to anchor))
         val markers = mapOf("unique" to "factory", "ambiguous" to "ambiguous", "unknown" to "unknown", "blocked" to "absent")
         val rules = write("rules.json", AnalysisRuleFile(
             items = markers.keys.map { AnalysisRuleItem(it, proposedName = "ExampleProduct", strategy = strategy(it)) },
-            anchors = markers.map { (key, marker) -> AnalysisAnchorDefinition(key, locators = listOf(Locator("string-use", "fixture.external.$marker"))) }))
+            anchors = markers.map { (key, marker) -> AnalysisAnchorDefinition(key, locators = listOf(Locator("string-use", "fixture.external.$marker"))) } +
+                listOf(AnalysisAnchorDefinition("product-symbol", strategy = strategy("unique")),
+                    AnalysisAnchorDefinition("product.value", strategy = StrategySpec("example.instance-integer-field",
+                        resultKind = EntityKind.FIELD, requires = mapOf("owner" to "product-symbol"))))))
         val source = root.resolve("source")
         call("analysis", "prepare", "--apk", apk("v1").toString(), "--rules", rules.toString(), "--run", source.toString())
         val sourceRun = read(source.resolve("run.json"))
@@ -75,6 +85,26 @@ class ExternalFlowTest {
         val sourceKnowledge = read(published.resolve("knowledge.json"))
         val sourceEntry = sourceKnowledge.getAsJsonArray("entries").single().asJsonObject
         assertEquals(expectedProduct("v1"), sourceEntry.getAsJsonObject("binding").get("descriptor").asString)
+        val keys = write("symbol-keys.json", listOf("product-symbol", "product.value"))
+        fun verifySymbols(publication: Path, version: String) {
+            val output = root.resolve("bindings-$version.json")
+            call("knowledge", "export-symbols", "--knowledge", publication.resolve("knowledge.json").toString(),
+                "--keys", keys.toString(), "--out", output.toString())
+            val document = read(output)
+            assertEquals(Digests.file(publication.resolve("knowledge.json")), document.getAsJsonObject("source").get("sha256").asString)
+            val symbols = document.getAsJsonObject("symbols")
+            val field = symbols.getAsJsonObject("product.value")
+            assertEquals("FIELD", field.get("kind").asString)
+            assertEquals(expectedProduct(version), field.get("owner").asString)
+            assertEquals(expectedField(version), field.get("name").asString)
+            assertNotEquals("value", field.get("name").asString)
+            assertEquals("I", field.get("descriptor").asString)
+            assertFalse(field.get("isStatic").asBoolean)
+            assertFalse(symbols.getAsJsonObject("product-symbol").has("isStatic"))
+            // Tiny mappings retain class-only Rename authority.
+            assertTrue(Files.readAllLines(publication.resolve("mapping.tiny")).drop(1).all { it.startsWith("c\t") })
+        }
+        verifySymbols(published, "v1")
         val target = root.resolve("target")
         call("migration", "prepare", "--knowledge", published.resolve("knowledge.json").toString(), "--source-apk", apk("v1").toString(),
             "--target-apk", apk("v2").toString(), "--run", target.toString())
@@ -85,6 +115,11 @@ class ExternalFlowTest {
         assertEquals(sourceEntry.get("semanticId"), targetEntry.get("semanticId"))
         assertEquals(expectedProduct("v2"), targetEntry.getAsJsonObject("binding").get("descriptor").asString)
         assertNotEquals(expectedProduct("v1"), expectedProduct("v2"))
+        verifySymbols(targetPub, "v2")
+        val sourceField = sourceKnowledge.getAsJsonArray("anchors").single { it.asJsonObject.get("key").asString == "product.value" }.asJsonObject
+        val targetField = read(targetPub.resolve("knowledge.json")).getAsJsonArray("anchors").single { it.asJsonObject.get("key").asString == "product.value" }.asJsonObject
+        assertEquals(sourceField.getAsJsonObject("rule").get("revisionId"), targetField.getAsJsonObject("rule").get("revisionId"))
+        assertNotEquals(sourceField.getAsJsonObject("resolution").get("resolutionId"), targetField.getAsJsonObject("resolution").get("resolutionId"))
         call("knowledge", "verify", "--knowledge", targetPub.resolve("knowledge.json").toString(), "--apk", apk("v2").toString(), "--work", root.resolve("readback").toString())
         val replay = root.resolve("replay")
         call("migration", "publish", "--run", target.toString(), "--out", replay.toString(), "--at", targetPub.resolve("report.json").toString())
@@ -100,6 +135,7 @@ class ExternalFlowTest {
         call("analysis", "run", "--method", "example.factory", "--config", config.toString(), "--work", work.toString())
         assertEquals("UNIQUE", read(work.resolve("run/run.json")).getAsJsonArray("tasks").single().asJsonObject.getAsJsonObject("resolution").get("status").asString)
         write("summary.json", mapOf("status" to "passed", "sdkOnlyCompilation" to true, "coreLifecycle" to true,
-            "scenarioExecuted" to true, "oracleOnlyInAssertions" to true, "changedExtensionRejectsOldProof" to true))
+            "scenarioExecuted" to true, "oracleOnlyInAssertions" to true, "changedExtensionRejectsOldProof" to true,
+            "terminalFieldMigratedAndExported" to true, "fieldRename" to false))
     }
 }

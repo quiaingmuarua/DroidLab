@@ -7,6 +7,7 @@ import dev.dexlineage.knowledge.RuleProofs
 import dev.dexlineage.model.*
 import dev.dexlineage.rules.facts.DexFactSession
 import dev.dexlineage.rules.facts.ApkFacts
+import dev.dexlineage.rules.facts.OriginalEntities
 import java.nio.file.Path
 
 /** Compile-time registry. A strategy is executable matching code, never a publication authority. */
@@ -37,8 +38,11 @@ class StrategyRegistry(extensions: List<MatchingHandler> = emptyList()) {
     }
 
     internal fun literals(rule: RuleRevision): Set<String> = handler(rule).scanNeeds(rule).literals
-    internal fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult =
-        handler(rule).execute(session, rule, dependencies)
+    internal fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult {
+        val result = handler(rule).execute(session, rule, dependencies)
+        result.unresolvedPaths.forEach { OriginalEntities.requirePresent(session, EntityRef(it.source.owner, it.source)) }
+        return result.copy(matches = OriginalEntities.record(session, result.matches))
+    }
     internal fun deferredEvidence(rule: RuleRevision): Boolean = handler(rule).evidenceMode == EvidenceMode.ON_INSPECT
 
     fun discover(artifact: Artifact, rule: RuleRevision, workDir: Path, anchors: Map<String, SupportAnchor> = emptyMap()): QueryResult {
@@ -48,8 +52,7 @@ class StrategyRegistry(extensions: List<MatchingHandler> = emptyList()) {
         val dependencies = checkDependencies(rule, artifact, anchors)
         DexFactSession(artifact, literals(rule), dependencies.values.mapNotNull { it.binding.method }.toSet()).use { session ->
             dependencies.values.forEach { dependency ->
-                requireInput(session.classes[dependency.binding.owner.descriptor]?.ref == dependency.binding.owner, "Dependency class/DEX identity absent from APK")
-                dependency.binding.method?.let { requireInput(session.method(it) != null, "Dependency method absent from APK") }
+                OriginalEntities.requirePresent(session, dependency.binding)
             }
             val result = execute(session, rule, dependencies)
             val facts = result.matches
