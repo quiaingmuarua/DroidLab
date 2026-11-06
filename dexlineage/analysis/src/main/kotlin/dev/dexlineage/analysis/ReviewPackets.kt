@@ -22,18 +22,20 @@ data class ReviewPacketResult(val schemaVersion: Int = SCHEMA_VERSION, val kind:
     val summaryPath: String, val files: List<Artifact>)
 
 /** Mechanical evidence association only. The template deliberately contains no semantic decision. */
-object ReviewPackets {
+class ReviewPackets(private val service: AnalysisService = AnalysisService()) {
+    private val json = service.runtime.json
+    private val methods = service.runtime.methods
     fun write(runDir: Path, taskIds: Set<String>, outDir: Path): ReviewPacketResult {
-        val run = AnalysisService.readRun(runDir)
+        val run = service.readRun(runDir)
         requireInput(taskIds.all { id -> run.tasks.any { it.taskId == id } }, "Unknown review-packet selection")
         createNewDirectory(outDir)
-        val records = (if (taskIds.isEmpty()) emptyList() else AnalysisService.inspect(runDir, taskIds)).associateBy { it.ref }
-        val views = AnalysisService.tasks(runDir, "ALL", limit = Int.MAX_VALUE).items.associateBy { it.task.taskId }
+        val records = (if (taskIds.isEmpty()) emptyList() else service.inspect(runDir, taskIds)).associateBy { it.ref }
+        val views = service.tasks(runDir, "ALL", limit = Int.MAX_VALUE).items.associateBy { it.task.taskId }
         val selected = taskIds.sorted().map { id ->
             val task = run.tasks.single { it.taskId == id }; val view = views.getValue(id)
             val allowed = AnalysisPolicy.allowedRefs(run, task)
             ReviewPacketTask(task, view.state, view.reason, view.latestRevision,
-                AnalysisMethods.forRun(run).taskDetails(task),
+                methods.forRun(run).taskDetails(task),
                 AnalysisPolicy.requiredRefs(run, task).map { ref -> records.getValue(ref).evidenceId }.sorted(),
                 allowed.map { ref -> records.getValue(ref).evidenceId }.sorted(), manualName(run, task))
         }
@@ -47,19 +49,19 @@ object ReviewPackets {
         }
         val packet = ReviewPacket(runId = run.runId, apkSha256 = run.apk.sha256, engineBuildId = run.engineBuildId,
             tasks = selected, sharedEvidence = evidence)
-        val packetPath = outDir.resolve("review-packet.json"); JsonFiles.writeNew(packetPath, packet)
-        val templatePath = outDir.resolve("review-template.json"); JsonFiles.writeNew(templatePath, template(run, selected))
+        val packetPath = outDir.resolve("review-packet.json"); json.writeNew(packetPath, packet)
+        val templatePath = outDir.resolve("review-template.json"); json.writeNew(templatePath, template(run, selected))
         val summaryPath = outDir.resolve("summary.md"); Files.writeString(summaryPath, summary(packet))
         val result = ReviewPacketResult(runId = run.runId, taskIds = taskIds.sorted(), packetPath = packetPath.toAbsolutePath().toString(),
             templatePath = templatePath.toAbsolutePath().toString(), summaryPath = summaryPath.toAbsolutePath().toString(),
             files = (listOf(packetPath, templatePath, summaryPath).map(Digests::artifact) + evidence.flatMap { listOfNotNull(it.javaFile, it.smaliFile) }).sortedBy { it.path })
-        JsonFiles.writeNew(outDir.resolve("packet-manifest.json"), result)
+        json.writeNew(outDir.resolve("packet-manifest.json"), result)
         return result
     }
 
     fun validate(outDir: Path, runDir: Path, taskIds: Set<String>): ReviewPacketResult {
-        val run = AnalysisService.readRun(runDir)
-        val result = JsonFiles.read(outDir.resolve("packet-manifest.json"), ReviewPacketResult::class.java)
+        val run = service.readRun(runDir)
+        val result = json.read(outDir.resolve("packet-manifest.json"), ReviewPacketResult::class.java)
         requireInput(result.kind == "analysis-review-packet-manifest" && result.runId == run.runId && result.taskIds == taskIds.sorted(), "Review packet belongs to another run or selection")
         val root = outDir.toAbsolutePath().normalize()
         result.files.forEach { file ->
@@ -67,7 +69,7 @@ object ReviewPackets {
             Digests.verify(file)
         }
         requireInput(listOf(result.packetPath, result.templatePath, result.summaryPath).all { path -> result.files.any { it.path == path } }, "Incomplete review packet output manifest")
-        val packet = JsonFiles.read(Path.of(result.packetPath), ReviewPacket::class.java)
+        val packet = json.read(Path.of(result.packetPath), ReviewPacket::class.java)
         requireInput(packet.runId == run.runId && packet.apkSha256 == run.apk.sha256 && packet.engineBuildId == run.engineBuildId,
             "Review packet input identity mismatch")
         requireInput(packet.tasks.map { it.task.taskId }.sorted() == taskIds.sorted(), "Review packet selection mismatch")
@@ -78,7 +80,7 @@ object ReviewPackets {
             val allowed = AnalysisPolicy.allowedRefs(run, item.task).map { Identities.evidenceId(run.runId, it) }.sorted()
             val required = AnalysisPolicy.requiredRefs(run, item.task).map { Identities.evidenceId(run.runId, it) }.sorted()
             requireInput(item.evidenceIds == allowed && item.requiredEvidenceIds == required && allowed.all { it in evidence }, "Review packet evidence associations changed")
-            requireInput(item.methodDetails == AnalysisMethods.forRun(run).taskDetails(item.task), "Review packet method details changed")
+            requireInput(item.methodDetails == methods.forRun(run).taskDetails(item.task), "Review packet method details changed")
             item.manualName?.let { requireInput(it == manualName(run, item.task), "Review packet manual name differs from corpus") }
         }
         packet.sharedEvidence.forEach { entry ->
@@ -101,7 +103,7 @@ object ReviewPackets {
                     val name = item.task.existingEntry?.name ?: item.task.request.proposedName ?: item.manualName
                     if (name == null) add("name", JsonNull.INSTANCE) else addProperty("name", name)
                     addProperty("rationale", ""); add("unverified", JsonArray())
-                    add("evidenceIds", JsonFiles.gson.toJsonTree(item.evidenceIds))
+                    add("evidenceIds", json.gson.toJsonTree(item.evidenceIds))
                     item.latestRevision?.let { addProperty("supersedes", it) }
                 })
             }

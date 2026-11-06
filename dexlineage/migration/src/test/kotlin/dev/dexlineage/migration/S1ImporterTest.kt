@@ -56,7 +56,7 @@ class S1ImporterTest {
         Files.writeString(out.resolve("mapping.tiny"), "tiny\t2\t0\tobfuscated\tnamed\nc\tx\tCache\n")
         return Fixture(dir, out, run, baseline)
     }
-    private fun convert(output: Path, run: Path, destination: Path, ambiguous: Boolean = false) = S1Importer.importWithExecutor(output, run, destination) { artifact, rules, _ ->
+    private fun convert(output: Path, run: Path, destination: Path, ambiguous: Boolean = false) = S1Importer().importWithExecutor(output, run, destination) { artifact, rules, _ ->
         val refs = (if (ambiguous) listOf("Lx;", "Ly;") else listOf("Lx;")).map { ClassRef(artifact.sha256, it, "classes2.dex") }
         ResolutionBatch(rules.associate { rule -> rule.revisionId to RuleProofs.create(artifact.sha256, rule, "fixture-engine", refs.flatMap { MigrationFixtures.proof(it, rule.locators).matches }) },
             ScanResult(refs.associate { it.descriptor to it.dexEntry }, emptyMap(), MigrationFixtures.stats), null)

@@ -79,7 +79,7 @@ class V02ImporterTest {
     private fun historical(value: VersionKnowledge): VersionKnowledge = value.copy(knowledgeId = Digests.text(JsonFiles.encode(oldShape(value.copy(knowledgeId = "")))))
 
     private fun convert(f: Fixture, name: String = "converted", targets: List<Pair<String, MatchStatus>> = listOf("La;" to MatchStatus.PASS)): VersionKnowledge =
-        V02Importer.importWithExecutor(f.bundle.resolve("knowledge.json"), Path.of(f.apk.path), temp.resolve(name)) { artifact, rules, _ ->
+        V02Importer().importWithExecutor(f.bundle.resolve("knowledge.json"), Path.of(f.apk.path), temp.resolve(name)) { artifact, rules, _ ->
             val resolutions = rules.associate { rule -> rule.revisionId to RuleProofs.create(artifact.sha256, rule, "fixture-engine", targets.flatMap { (descriptor, status) ->
                 MigrationFixtures.proof(ClassRef(artifact.sha256, descriptor, "classes.dex"), rule.locators, status).matches
             }) }
@@ -135,7 +135,7 @@ class V02ImporterTest {
     @Test fun `an APK with the wrong digest cannot be used to rebind legacy knowledge`() {
         val f = fixture()
         val other = Files.writeString(temp.resolve("other"), "other bytes")
-        assertFailsWith<ValidationException> { V02Importer.importWithExecutor(f.bundle.resolve("knowledge.json"), other, temp.resolve("bad")) { _, _, _ -> error("Must not execute") } }
+        assertFailsWith<ValidationException> { V02Importer().importWithExecutor(f.bundle.resolve("knowledge.json"), other, temp.resolve("bad")) { _, _, _ -> error("Must not execute") } }
     }
     @Test fun `migration publication validates its old source and accepts HIGH review reuse`() {
         val f = migrationFixture()

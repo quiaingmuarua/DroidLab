@@ -37,25 +37,6 @@ tasks.named<Sync>("installDist") {
     into(rootProject.layout.buildDirectory.dir("install/dexlineage"))
 }
 
-tasks.register<Test>("realCaseTest") {
-    description = "Verify prepared, reviewed migration using an explicit local case properties file."
-    group = "verification"
-    testClassesDirs = sourceSets.test.get().output.classesDirs
-    classpath = sourceSets.test.get().runtimeClasspath
-    useJUnitPlatform { includeTags("real-case") }
-    workingDir = rootProject.projectDir
-    maxHeapSize = "3g"
-    providers.gradleProperty("caseProperties").orNull?.let {
-        systemProperty("dexlineage.caseProperties", rootProject.file(it).absolutePath)
-    }
-    outputs.upToDateWhen { false }
-    doFirst {
-        check(providers.gradleProperty("caseProperties").isPresent) {
-            "Pass -PcaseProperties=<local .properties file>; normal test/build never require private APKs."
-        }
-    }
-}
-
 val fixtureProject = rootProject.findProject(":dexlineage:fixture-apk")
 val fixtureBuildTiming = layout.buildDirectory.file("fixture-integration/apk-build.json")
 var fixtureBuildStartedNanos = 0L

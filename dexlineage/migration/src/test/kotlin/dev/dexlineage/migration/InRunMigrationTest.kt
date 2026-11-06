@@ -4,6 +4,8 @@ import com.google.gson.JsonObject
 import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.*
 import dev.dexlineage.model.*
+import dev.dexlineage.rules.*
+import dev.dexlineage.rules.facts.ApkFacts
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -12,6 +14,16 @@ import kotlin.test.*
 
 /** File/proof protocol fixtures; the public R8 suite owns actual matcher execution. */
 class InRunMigrationTest {
+    private class ProtocolHandler(override val id: String, override val resultKind: EntityKind,
+        override val dependencyKinds: Map<String, EntityKind>, private val parameter: String) : MatchingHandler {
+        override fun validate(rule: RuleRevision) { HandlerInputs.only(rule, setOf(parameter)); HandlerInputs.requiredString(rule, parameter) }
+        override fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult =
+            error("File protocol fixture must not execute an APK matcher")
+    }
+    private val service = MigrationService(ResolutionEngine(StrategyRegistry(listOf(
+        ProtocolHandler("fixture.method-role", EntityKind.METHOD, mapOf("lifecycle" to EntityKind.CLASS), "logLiteral"),
+        ProtocolHandler("fixture.class-role", EntityKind.CLASS, mapOf("nameMethod" to EntityKind.METHOD), "component")))))
+
     @TempDir lateinit var temp: Path
     private data class Fixture(val dir: Path, val run: MigrationRun)
 
@@ -34,8 +46,8 @@ class InRunMigrationTest {
         fun spec(id: String, parameter: String, value: String, kind: EntityKind, role: String, key: String) =
             StrategySpec(id, JsonObject().apply { addProperty(parameter, value) }, kind, mapOf(role to key))
         val rootRule = RuleProofs.revision(listOf(Locator("string-use", "lifecycle")))
-        val methodSpec = spec("messages.handler-name-method", "logLiteral", "lifecycle", EntityKind.METHOD, "lifecycle", "context")
-        val targetSpec = spec("messages.named-handler", "component", "FixtureHandler", EntityKind.CLASS, "nameMethod", "name")
+        val methodSpec = spec("fixture.method-role", "logLiteral", "lifecycle", EntityKind.METHOD, "lifecycle", "context")
+        val targetSpec = spec("fixture.class-role", "component", "FixtureHandler", EntityKind.CLASS, "nameMethod", "name")
         val methodRule = RuleProofs.revision(emptyList(), methodSpec)
         val targetRule = RuleProofs.revision(emptyList(), targetSpec)
         val definitions = MigrationRulesFile(items = listOf(MigrationRuleOverride(entry.semanticId, strategy = targetSpec)),
@@ -81,25 +93,25 @@ class InRunMigrationTest {
 
     @Test fun `one run owns complete symbol proofs and publication preserves those exact objects`() {
         val f = fixture()
-        assertNull(MigrationService.readRun(f.dir).targetBase)
+        assertNull(service.readRun(f.dir).targetBase)
         val out = temp.resolve("packet")
-        ReviewPackets.write(f.dir, emptySet(), out)
-        ReviewPackets.validate(out, f.dir)
+        ReviewPackets(service).write(f.dir, emptySet(), out)
+        ReviewPackets(service).validate(out, f.dir)
         val template = com.google.gson.JsonParser.parseString(Files.readString(out.resolve("review-template.json"))).asJsonObject
         val item = template.getAsJsonArray("items").single().asJsonObject
         item.addProperty("action", "ACCEPT"); item.addProperty("level", "HIGH"); item.addProperty("nameStillApplies", true)
         item.addProperty("identityReason", "Source-authored role is retained through the current dependency chain")
         val review = temp.resolve("review.json"); JsonFiles.writeNew(review, template)
-        MigrationService.submit(f.dir, review)
+        service.submit(f.dir, review)
         val publication = temp.resolve("published")
-        MigrationService.publish(f.dir, publication)
+        service.publish(f.dir, publication)
         val knowledge = KnowledgeFiles.read(publication.resolve("knowledge.json"))
         assertEquals(f.run.resolvedAnchors, knowledge.anchors.associateBy { it.key })
         assertEquals(f.run.tasks.single().resolution, knowledge.entries.single().resolution)
         assertEquals(knowledge.anchors.single { it.key == "name" }, knowledge.entries.single().resolution!!.dependencies.getValue("nameMethod"))
         assertEquals(knowledge.anchors.single { it.key == "context" }, knowledge.anchors.single { it.key == "name" }.resolution.dependencies.getValue("lifecycle"))
         val replay = temp.resolve("replay")
-        MigrationService.publish(f.dir, replay, publication.resolve("report.json"))
+        service.publish(f.dir, replay, publication.resolve("report.json"))
         assertEquals(Files.readString(publication.resolve("knowledge.json")), Files.readString(replay.resolve("knowledge.json")))
         val relocated = temp.resolve("relocated"); Files.move(publication, relocated)
         assertEquals(knowledge, KnowledgeFiles.read(relocated.resolve("knowledge.json")))
@@ -107,14 +119,14 @@ class InRunMigrationTest {
 
     @Test fun `failed root remains no match while its dependents stay blocked`() {
         val f = fixture(blocked = true)
-        val read = MigrationService.readRun(f.dir)
+        val read = service.readRun(f.dir)
         assertEquals(ResolutionStatus.NO_MATCH, read.anchorTasks.first().resolution!!.status)
         assertEquals(listOf("context"), read.anchorTasks.last().waitingFor)
         assertEquals(listOf("name"), read.tasks.single().waitingFor)
-        val packet = temp.resolve("packet"); ReviewPackets.write(f.dir, emptySet(), packet)
+        val packet = temp.resolve("packet"); ReviewPackets(service).write(f.dir, emptySet(), packet)
         val template = com.google.gson.JsonParser.parseString(Files.readString(packet.resolve("review-template.json"))).asJsonObject
         assertEquals(0, template.getAsJsonArray("items").size())
-        val out = temp.resolve("published"); MigrationService.publish(f.dir, out)
+        val out = temp.resolve("published"); service.publish(f.dir, out)
         val knowledge = KnowledgeFiles.read(out.resolve("knowledge.json"))
         assertTrue(knowledge.entries.isEmpty()); assertTrue(knowledge.anchors.isEmpty())
         assertEquals("waiting_dependency", knowledge.unresolved.single().reason)
@@ -125,10 +137,10 @@ class InRunMigrationTest {
         val f = fixture()
         val forged = f.run.copy(resolvedAnchors = f.run.resolvedAnchors!! - "context")
         Files.writeString(f.dir.resolve("run.json"), JsonFiles.encode(forged.copy(runId = forged.fingerprint())))
-        assertFailsWith<ValidationException> { MigrationService.readRun(f.dir) }
+        assertFailsWith<ValidationException> { service.readRun(f.dir) }
         Files.writeString(f.dir.resolve("run.json"), JsonFiles.encode(f.run))
         val ownerEvidence = f.run.resolvedAnchors!!.getValue("context").evidence.single()
         Files.writeString(f.dir.resolve(ownerEvidence.javaPath), "changed code")
-        assertFailsWith<ValidationException> { MigrationService.readRun(f.dir) }
+        assertFailsWith<ValidationException> { service.readRun(f.dir) }
     }
 }

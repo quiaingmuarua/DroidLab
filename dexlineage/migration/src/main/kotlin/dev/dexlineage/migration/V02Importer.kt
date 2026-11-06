@@ -10,9 +10,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /** Explicit schema-2 publication adapter. Historical decisions are checked, never executed as v0.3 reviews. */
-object V02Importer {
+class V02Importer(private val engine: ResolutionEngine = ResolutionEngine(), private val json: JsonCodec = JsonCodec()) {
     fun importKnowledge(knowledgePath: Path, apkPath: Path, out: Path): VersionKnowledge =
-        importWithExecutor(knowledgePath, apkPath, out, ResolutionEngine::execute)
+        importWithExecutor(knowledgePath, apkPath, out, engine::execute)
 
     internal fun importWithExecutor(knowledgePath: Path, apkPath: Path, out: Path, execute: ResolutionExecutor): VersionKnowledge = checkedInput("v0.2 import") {
         val source = knowledgePath.toAbsolutePath().parent
@@ -22,10 +22,10 @@ object V02Importer {
         requireInput(!raw.has("parentKnowledgeId") && !raw.has("anchors") && !raw.has("migrationSourceKnowledgeId") && raw.getAsJsonArray("entries").all { e -> !e.asJsonObject.has("resolution") && !e.asJsonObject.has("ruleRevision") }, "v0.2 input contains newer proof fields")
         val oldId = raw["knowledgeId"].asString
         val fingerprint = raw.deepCopy().apply { addProperty("knowledgeId", "") }
-        requireInput(oldId == Digests.text(JsonFiles.encode(fingerprint)), "v0.2 knowledge fingerprint mismatch")
+        requireInput(oldId == Digests.text(this.json.encode(fingerprint)), "v0.2 knowledge fingerprint mismatch")
         val rawEntries = raw.getAsJsonArray("entries").map { it.asJsonObject } + raw.getAsJsonArray("unresolved").map { it.asJsonObject.getAsJsonObject("entry") }
         rawEntries.forEach { RuleJson.validateLocators(it["locators"] ?: throw ValidationException("Missing legacy locators")) }
-        val knowledge = JsonFiles.gson.fromJson(raw, VersionKnowledge::class.java)
+        val knowledge = this.json.gson.fromJson(raw, VersionKnowledge::class.java)
         val artifact = Digests.artifact(apkPath)
         requireInput(artifact.sha256 == knowledge.artifact.sha256, "Provided APK does not match v0.2 knowledge")
         val allIds = knowledge.entries.map { it.semanticId } + knowledge.unresolved.map { it.entry.semanticId }
@@ -93,7 +93,7 @@ object V02Importer {
             val level = Confidence.valueOf(review["level"].asString)
             val supersedes = review["supersedes"]?.takeUnless { it.isJsonNull }?.asString
             val draft = StoredReview(schemaVersion = 2, revisionId = "", runId = runId, taskId = taskId, supersedes = supersedes, payload = review)
-            val revision = Digests.text(JsonFiles.encode(draft))
+            val revision = Digests.text(this.json.encode(draft))
             requireInput(revisions[taskId]?.asString == revision && entry.provenance == "$scenario:$runId:$revision", "Legacy review revision/provenance mismatch")
             val ids = stringList(review, "evidenceIds")
             requireInput(ids.distinct().size == ids.size, "Duplicate legacy review evidence")
@@ -104,7 +104,7 @@ object V02Importer {
             if (scenario == "bootstrap") {
                 requireInput(entry.semanticId == Digests.text("semantic\n${artifact.sha256}\n${entry.binding.descriptor}"), "Legacy Bootstrap semantic identity mismatch")
                 requireInput(review["name"].asString == entry.name && review["rationale"].asString == entry.rationale && entry.rationale.isNotBlank(), "Legacy naming rationale mismatch")
-                val expectedProposal = Digests.text("proposal\n${artifact.sha256}\n${entry.binding.descriptor}\n${JsonFiles.encode(entry.captures.toSortedMap())}")
+                val expectedProposal = Digests.text("proposal\n${artifact.sha256}\n${entry.binding.descriptor}\n${this.json.encode(entry.captures.toSortedMap())}")
                 requireInput(d["proposalId"]?.asString == expectedProposal, "Legacy Bootstrap proposal differs from captures")
                 review["proposalId"]?.let { requireInput(it.asString == expectedProposal, "Legacy review proposal mismatch") }
                 val threshold = Confidence.valueOf(report.getAsJsonObject("profile")["minConfidence"]?.asString ?: throw ValidationException("Missing original Bootstrap confidence threshold"))
@@ -125,7 +125,7 @@ object V02Importer {
         createNewDirectory(out)
         val result = LegacyUpgrade.publish(artifact, knowledge.entries, knowledge.unresolved, source, out, oldId, "v02-import:$oldId", execute)
         inputArtifacts.forEach(Digests::verify)
-        JsonFiles.writeNew(out.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "v02-import-report", "knowledgeId" to result.knowledge.knowledgeId,
+        this.json.writeNew(out.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "v02-import-report", "knowledgeId" to result.knowledge.knowledgeId,
             "parentKnowledgeId" to oldId, "sourceKnowledge" to Digests.artifact(knowledgePath), "legacyReport" to report,
             "decisions" to result.decisions, "accepted" to result.knowledge.entries.size, "unresolved" to result.knowledge.unresolved.size))
         result.knowledge
@@ -173,5 +173,5 @@ object V02Importer {
     }
     private fun stringList(obj: JsonObject, key: String): List<String> = obj.getAsJsonArray(key)?.map { it.asString }
         ?: throw ValidationException("Missing legacy $key")
-    private fun <T> parse(obj: JsonObject, key: String, type: Class<T>): T = JsonFiles.gson.fromJson(obj[key] ?: throw ValidationException("Missing legacy $key"), type)
+    private fun <T> parse(obj: JsonObject, key: String, type: Class<T>): T = this.json.gson.fromJson(obj[key] ?: throw ValidationException("Missing legacy $key"), type)
 }

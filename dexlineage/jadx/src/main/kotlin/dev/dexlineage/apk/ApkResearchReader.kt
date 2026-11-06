@@ -41,7 +41,7 @@ object ApkResearchReader {
                         val calls = mutableListOf<ResearchCallSite>()
                         val accesses = mutableListOf<ResearchFieldAccess>()
                         val diagnostics = mutableListOf<String>()
-                        method.code?.visitInstructions { insn ->
+                        session.rawMethod(method).code?.visitInstructions { insn ->
                             when {
                                 insn.opcode == Opcode.UNKNOWN -> throw ExecutionException(
                                     "Unknown raw instruction in ${ref.descriptor}->${method.id.shortId} at ${insn.offset}")
@@ -68,7 +68,7 @@ object ApkResearchReader {
                                 }
                             }
                         }
-                        ResearchMethodFact(session.methodRef(method.id), method.flags, method.code != null,
+                        ResearchMethodFact(session.methodRef(method.id), method.flags, method.hasCode,
                             strings.sortedBy { it.codeUnitOffset }, calls.sortedBy { it.codeUnitOffset },
                             accesses.sortedBy { it.codeUnitOffset }, diagnostics.toList())
                     }.sortedWith(compareBy({ it.ref.name }, { it.ref.descriptor }))

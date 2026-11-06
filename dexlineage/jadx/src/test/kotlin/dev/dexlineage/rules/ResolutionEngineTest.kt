@@ -13,6 +13,7 @@ import java.util.zip.ZipOutputStream
 import kotlin.test.*
 
 class ResolutionEngineTest {
+    private val engine = ResolutionEngine()
     @TempDir lateinit var temp: Path
     private val apk = Artifact("not-opened-by-data-fixture.apk", "a".repeat(64))
     private fun rule(vararg literals: String) = RuleProofs.revision(literals.map { Locator("string-use", it) })
@@ -27,7 +28,7 @@ class ResolutionEngineTest {
 
     @Test fun `alternative locators and fields for one class remain a unique identity`() {
         val revision = rule("first", "second")
-        val result = ResolutionEngine.resolveQuery(apk, listOf(revision), "build", query(
+        val result = engine.resolveQuery(apk, listOf(revision), "build", query(
             fact("Lone;"), fact("Lone;", MatchStatus.UNKNOWN, 0), fact("Lone;", index = 1),
         )).getValue(revision.revisionId)
         assertEquals(ResolutionStatus.UNIQUE, result.status)
@@ -38,7 +39,7 @@ class ResolutionEngineTest {
 
     @Test fun `two certain entities remain ambiguous with all candidates retained`() {
         val revision = rule("shared")
-        val result = ResolutionEngine.resolveQuery(apk, listOf(revision), "build", query(fact("Lb;"), fact("La;")))
+        val result = engine.resolveQuery(apk, listOf(revision), "build", query(fact("Lb;"), fact("La;")))
             .getValue(revision.revisionId)
         assertEquals(ResolutionStatus.AMBIGUOUS, result.status)
         assertNull(result.uniqueRef)
@@ -48,7 +49,7 @@ class ResolutionEngineTest {
     @Test fun `an unresolved other entity cannot be treated as an excluded candidate`() {
         val revision = rule("shared")
         for (facts in listOf(arrayOf(fact("La;", MatchStatus.UNKNOWN)), arrayOf(fact("La;"), fact("Lb;", MatchStatus.UNKNOWN)))) {
-            val result = ResolutionEngine.resolveQuery(apk, listOf(revision), "build", query(*facts)).getValue(revision.revisionId)
+            val result = engine.resolveQuery(apk, listOf(revision), "build", query(*facts)).getValue(revision.revisionId)
             assertEquals(ResolutionStatus.UNKNOWN, result.status)
             assertNull(result.uniqueRef)
         }
@@ -56,10 +57,10 @@ class ResolutionEngineTest {
 
     @Test fun `a failed predicate eliminates that entity but no hits is not an execution error`() {
         val revision = rule("literal")
-        val failed = ResolutionEngine.resolveQuery(apk, listOf(revision), "build", query(fact("La;", MatchStatus.FAIL))).getValue(revision.revisionId)
+        val failed = engine.resolveQuery(apk, listOf(revision), "build", query(fact("La;", MatchStatus.FAIL))).getValue(revision.revisionId)
         assertEquals(ResolutionStatus.NO_MATCH, failed.status)
         assertEquals(1, failed.matches.size)
-        val absent = ResolutionEngine.resolveQuery(apk, listOf(revision), "build", query()).getValue(revision.revisionId)
+        val absent = engine.resolveQuery(apk, listOf(revision), "build", query()).getValue(revision.revisionId)
         assertEquals(ResolutionStatus.NO_MATCH, absent.status)
         assertTrue(absent.matches.isEmpty())
     }
@@ -67,7 +68,7 @@ class ResolutionEngineTest {
     @Test fun `flattened indexes are local to each immutable rule revision`() {
         val first = rule("a", "b")
         val second = rule("c")
-        val result = ResolutionEngine.resolveQuery(apk, listOf(first, second), "build", query(
+        val result = engine.resolveQuery(apk, listOf(first, second), "build", query(
             fact("Lfirst;", index = 0), fact("Lfirst;", index = 1), fact("Lsecond;", index = 2),
         ))
         assertEquals(listOf(0, 1), result.getValue(first.revisionId).matches.map { it.locatorIndex })
@@ -77,12 +78,12 @@ class ResolutionEngineTest {
 
     @Test fun `replacing a broad rule can resolve ambiguity but OR appending cannot`() {
         val broadAndNarrow = rule("broad", "narrow")
-        val union = ResolutionEngine.resolveQuery(apk, listOf(broadAndNarrow), "build", query(
+        val union = engine.resolveQuery(apk, listOf(broadAndNarrow), "build", query(
             fact("La;", index = 0), fact("Lb;", index = 0), fact("La;", index = 1),
         )).getValue(broadAndNarrow.revisionId)
         assertEquals(ResolutionStatus.AMBIGUOUS, union.status)
         val replacement = rule("narrow")
-        val resolved = ResolutionEngine.resolveQuery(apk, listOf(replacement), "build", query(fact("La;"))).getValue(replacement.revisionId)
+        val resolved = engine.resolveQuery(apk, listOf(replacement), "build", query(fact("La;"))).getValue(replacement.revisionId)
         assertEquals(ResolutionStatus.UNIQUE, resolved.status)
         assertNotEquals(union.rule.revisionId, resolved.rule.revisionId)
         assertNotEquals(union.resolutionId, resolved.resolutionId)
@@ -91,19 +92,19 @@ class ResolutionEngineTest {
     @Test fun `identical revision requests share execution and changed content cannot reuse an ID`() {
         val first = rule("one")
         val second = rule("two")
-        val normalized = ResolutionEngine.normalizedRules(listOf(first, second, first))
+        val normalized = engine.normalizedRules(listOf(first, second, first))
         assertEquals(2, normalized.size)
         assertEquals(normalized.sortedBy { it.revisionId }, normalized)
-        assertFailsWith<ValidationException> { ResolutionEngine.normalizedRules(listOf(first.copy(locators = second.locators))) }
-        assertFailsWith<ValidationException> { ResolutionEngine.normalizedRules(listOf(RuleProofs.revision(listOf(Locator("not-supported", "anchor"))))) }
+        assertFailsWith<ValidationException> { engine.normalizedRules(listOf(first.copy(locators = second.locators))) }
+        assertFailsWith<ValidationException> { engine.normalizedRules(listOf(RuleProofs.revision(listOf(Locator("not-supported", "anchor"))))) }
     }
 
     @Test fun `incomplete scan cannot become a no-match resolution`() {
         assertFailsWith<ExecutionException> {
-            ResolutionEngine.resolveQuery(apk, listOf(rule("missing")), "build", query(diagnostics = listOf("unreadable dex")))
+            engine.resolveQuery(apk, listOf(rule("missing")), "build", query(diagnostics = listOf("unreadable dex")))
         }
         assertFailsWith<ValidationException> {
-            ResolutionEngine.resolveQuery(apk, listOf(rule("missing")), "build", query(fact("La;", index = 5)))
+            engine.resolveQuery(apk, listOf(rule("missing")), "build", query(fact("La;", index = 5)))
         }
     }
 
@@ -130,13 +131,13 @@ class ResolutionEngineTest {
                 zip.putNextEntry(ZipEntry(directory.relativize(path).toString().replace('\\', '/')).apply { time = 123456L })
                 zip.write(Files.readAllBytes(path)); zip.closeEntry()
             }
-            zip.putNextEntry(ZipEntry("META-INF/build-note.txt")); zip.write("irrelevant".toByteArray()); zip.closeEntry()
+            zip.putNextEntry(ZipEntry("META-INF/MANIFEST.MF")); zip.write("Manifest-Version: 1.0".toByteArray()); zip.closeEntry()
         }
-        val before = ResolutionEngine.fingerprintArtifacts(mapOf("module" to directory))
-        assertEquals(before, ResolutionEngine.fingerprintArtifacts(mapOf("module" to jar)))
+        val before = engine.fingerprintArtifacts(mapOf("module" to directory))
+        assertEquals(before, engine.fingerprintArtifacts(mapOf("module" to jar)))
         Files.setLastModifiedTime(first, FileTime.fromMillis(9999999))
-        assertEquals(before, ResolutionEngine.fingerprintArtifacts(mapOf("module" to directory)))
+        assertEquals(before, engine.fingerprintArtifacts(mapOf("module" to directory)))
         Files.write(first, byteArrayOf(1, 2, 7))
-        assertNotEquals(before, ResolutionEngine.fingerprintArtifacts(mapOf("module" to directory)))
+        assertNotEquals(before, engine.fingerprintArtifacts(mapOf("module" to directory)))
     }
 }

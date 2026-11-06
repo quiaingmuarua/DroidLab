@@ -4,7 +4,7 @@ import com.google.gson.JsonParser
 import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.RuleProofs
 import dev.dexlineage.model.*
-import dev.dexlineage.rules.facts.DexFactSession
+import dev.dexlineage.rules.facts.ApkFacts
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -26,10 +26,67 @@ class HandlerBoundaryTest {
             requireInput(producers.getValue(rule.requires.getValue("input")).strategyId == "fixture.expected-producer", "Handler-owned producer constraint")
         }
         override fun scanNeeds(rule: RuleRevision) = ScanNeeds(setOf("a handler-owned literal"))
-        override fun execute(session: DexFactSession, rule: RuleRevision, dependencies: Map<String, SupportAnchor>) = StrategyResult(emptyList())
+        override fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>) = StrategyResult(emptyList())
     }
     private fun custom(limit: Int = 7) = RuleProofs.revision(emptyList(), StrategySpec("fixture.arbitrary-handler",
         JsonParser.parseString("""{"customLimit":$limit}""").asJsonObject, EntityKind.CLASS, mapOf("input" to "seed")))
+
+    private open class NamedHandler(override val id: String) : MatchingHandler {
+        override val resultKind = EntityKind.CLASS
+        override val dependencyKinds = emptyMap<String, EntityKind>()
+        override fun validate(rule: RuleRevision) = Unit
+        override fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>) = StrategyResult(emptyList())
+    }
+    private class OtherNamedHandler(id: String) : NamedHandler(id)
+
+    @Test fun `identity includes ID to implementation association within the same artifact`() {
+        fun id(vararg handlers: MatchingHandler) = ResolutionEngine(StrategyRegistry(handlers.toList())).buildId()
+        val first = id(NamedHandler("fixture.a"), OtherNamedHandler("fixture.b"))
+        val swapped = id(OtherNamedHandler("fixture.a"), NamedHandler("fixture.b"))
+        assertNotEquals(first, swapped, "Equal class sets and registration ID sets are insufficient")
+        assertEquals(first, id(OtherNamedHandler("fixture.b"), NamedHandler("fixture.a")), "Registry order has no meaning")
+    }
+
+    @Test fun `registry snapshots declarations and does not expose mutable dependency roles`() {
+        val roles = linkedMapOf("input" to EntityKind.CLASS)
+        val implementation = object : MatchingHandler {
+            override var id = "fixture.snapshot"
+            override var resultKind = EntityKind.CLASS
+            override var evidenceMode = EvidenceMode.EAGER
+            override val dependencyKinds = roles
+            override fun validate(rule: RuleRevision) = Unit
+            override fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>) = StrategyResult(emptyList())
+        }
+        val registry = StrategyRegistry(listOf(implementation))
+        val rule = RuleProofs.revision(emptyList(), StrategySpec("fixture.snapshot", resultKind = EntityKind.CLASS,
+            requires = mapOf("input" to "seed")))
+        implementation.id = "fixture.changed"
+        implementation.resultKind = EntityKind.METHOD
+        implementation.evidenceMode = EvidenceMode.ON_INSPECT
+        roles["input"] = EntityKind.METHOD
+        registry.validate(rule)
+        assertEquals(mapOf("input" to EntityKind.CLASS), registry.dependencyKinds(rule))
+        assertFalse(registry.deferredEvidence(rule))
+        assertFailsWith<UnsupportedOperationException> {
+            (registry.dependencyKinds(rule) as MutableMap<String, EntityKind>)["input"] = EntityKind.METHOD
+        }
+        assertFailsWith<ValidationException> {
+            registry.validate(RuleProofs.revision(emptyList(), StrategySpec("fixture.changed", resultKind = EntityKind.CLASS)))
+        }
+    }
+
+    @Test fun `runtime assembly is explicit isolated and has no mutable registration channel`() {
+        val supplied = mutableListOf<MatchingHandler>(CustomHandler())
+        val extended = StrategyRegistry(supplied)
+        supplied.clear()
+        extended.validate(custom())
+        assertFailsWith<ValidationException> { StrategyRegistry().validate(custom()) }
+        assertFailsWith<ValidationException> { StrategyRegistry(listOf(CustomHandler(), CustomHandler())) }
+        val coreId = ResolutionEngine().buildId()
+        val extendedId = ResolutionEngine(extended).buildId()
+        assertNotEquals(coreId, extendedId)
+        assertEquals(extendedId, ResolutionEngine(StrategyRegistry(listOf(CustomHandler()))).buildId())
+    }
 
     @Test fun `a new registered handler supplies validation inputs and producer policy without central vocabulary`() {
         val table = HandlerRegistry(listOf(CustomHandler()))

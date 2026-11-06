@@ -8,13 +8,13 @@ import dev.dexlineage.model.*
 import dev.dexlineage.rules.RuleEngine
 import dev.dexlineage.rules.ResolutionEngine
 import dev.dexlineage.rules.RuleJson
-import dev.dexlineage.rules.StrategyRegistry
 import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 
-object MigrationService {
+class MigrationService(val engine: ResolutionEngine = ResolutionEngine(), val json: JsonCodec = JsonCodec()) {
+    private val registry = engine.registry
     fun prepare(knowledgePath: Path, sourceApkPath: Path, targetApkPath: Path, runDir: Path, minConfidence: Confidence = Confidence.HIGH,
                 rulesPath: Path? = null, targetBasePath: Path? = null): MigrationRun {
         val knowledgeFile = Digests.artifact(knowledgePath)
@@ -35,12 +35,12 @@ object MigrationService {
         validateDependencyDefinitions(rules.values.toList(), anchorRules)
         // Reusable target symbols seed this execution; new unique symbols are available immediately.
         val available = targetBase?.anchors.orEmpty().filter { anchor ->
-            anchor.rule == anchorRules[anchor.key] && anchor.resolution.engineBuildId == ResolutionEngine.buildId()
+            anchor.rule == anchorRules[anchor.key] && anchor.resolution.engineBuildId == engine.buildId()
         }.associateBy { it.key }.let { current -> stableAnchors(current) }
         val inheritedEntries = targetBase?.entries.orEmpty().filter { entry ->
-            entry.resolution?.let { reusable(it, rules.getValue(entry.semanticId), available, ResolutionEngine.buildId()) } == true
+            entry.resolution?.let { reusable(it, rules.getValue(entry.semanticId), available, engine.buildId()) } == true
         }.associateBy { it.semanticId }
-        val inheritedAnchors = available.filter { (_, anchor) -> reusable(anchor.resolution, anchor.rule, available, ResolutionEngine.buildId()) }
+        val inheritedAnchors = available.filter { (_, anchor) -> reusable(anchor.resolution, anchor.rule, available, engine.buildId()) }
         createNewDirectory(runDir)
         try {
             val sourceScan = ApkReader.scan(sourceApkPath, emptySet())
@@ -48,7 +48,7 @@ object MigrationService {
             orderedEntries.forEach { requireInput(sourceScan.classes[it.binding.descriptor] == it.binding.dexEntry, "Source binding absent from source APK: ${it.semanticId}") }
             knowledge.anchors.forEach { requireInput(sourceScan.classes[it.binding.owner.descriptor] == it.binding.owner.dexEntry, "Source anchor absent from source APK: ${it.key}") }
             val executing = rules.filterKeys { it !in inheritedEntries }.values + anchorRules.filterKeys { it !in inheritedAnchors }.values
-            val query = ResolutionEngine.openSession(target, runDir).use { session ->
+            val query = engine.openSession(target, runDir).use { session ->
                 session.execute(executing.toList(), anchorRules, available)
             }
             requireScan(query.scan)
@@ -71,27 +71,27 @@ object MigrationService {
             var run = MigrationRun(runId = "", knowledgeFile = knowledgeFile, knowledge = knowledge, sourceApk = source, targetApk = target,
                 minConfidence = minConfidence, tasks = tasks, sourceInventory = sourceScan.classes.toSortedMap(), targetInventory = query.scan.classes.toSortedMap(),
                 sourceScan = sourceScan.stats, targetScan = query.scan.stats, analysisDiagnostics = query.analysis?.diagnostics.orEmpty(), analysisMillis = query.analysis?.elapsedMillis ?: 0,
-                createdAt = Instant.now().toString(), rulesFile = rulesFile, ruleOverrides = overrides.sortedBy { it.semanticId }, engineBuildId = ResolutionEngine.buildId(),
+                createdAt = Instant.now().toString(), rulesFile = rulesFile, ruleOverrides = overrides.sortedBy { it.semanticId }, engineBuildId = engine.buildId(),
                 targetBaseFile = targetBaseFile, targetBase = targetBase, anchorTasks = anchorTasks, anchorOverrides = definitions.anchors.sortedBy { it.key },
                 methodArtifacts = MigrationArtifacts.copy(artifacts, runDir).takeIf { it.isNotEmpty() }, methodArtifactSource = artifactSource,
                 dependencyEvaluation = "in-run", resolvedAnchors = query.resolvedAnchors, evaluatedRules = query.evaluatedRules)
-            run = run.copy(runId = run.fingerprint())
+            run = run.copy(runId = run.fingerprint(json))
             query.analysis?.code?.let { code ->
                 val refs = code.mapNotNull { c -> run.targetInventory[c.descriptor]?.let { ClassRef(target.sha256, c.descriptor, it) } }
                 EvidenceFiles.publish(runDir, run.runId, target, refs, code)
             }
-            JsonFiles.writeNew(runDir.resolve("run.json"), run)
+            this.json.writeNew(runDir.resolve("run.json"), run)
             return run
         } catch (e: Exception) {
-            if (!Files.exists(runDir.resolve("failure.json"))) JsonFiles.writeNew(runDir.resolve("failure.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "operation" to "migration.prepare", "message" to (e.message ?: e.javaClass.name)))
+            if (!Files.exists(runDir.resolve("failure.json"))) this.json.writeNew(runDir.resolve("failure.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "operation" to "migration.prepare", "message" to (e.message ?: e.javaClass.name)))
             throw e
         }
     }
 
     fun readRun(dir: Path, verifyInputs: Boolean = true): MigrationRun = checkedInput("migration run") {
-        val run = JsonFiles.read(dir.resolve("run.json"), MigrationRun::class.java)
+        val run = this.json.read(dir.resolve("run.json"), MigrationRun::class.java)
         requireInput(run.kind == "migration-run" && run.toolVersion == TOOL_VERSION && run.jadxVersion == JADX_VERSION, "Unsupported migration run")
-        requireInput(run.runId == run.fingerprint(), "Migration run fingerprint mismatch")
+        requireInput(run.runId == run.fingerprint(json), "Migration run fingerprint mismatch")
         MigrationArtifacts.verify(run.methodArtifacts.orEmpty())
         run.methodArtifactSource?.let { source ->
             requireInput(run.targetBaseFile != null && Path.of(source.path) == Path.of(run.targetBaseFile.path).parent.resolve("report.json"), "Inherited artifact report is not the target base report")
@@ -250,7 +250,7 @@ object MigrationService {
     fun submit(dir: Path, reviewFile: Path): MigrationSubmission {
         val run = readRun(dir)
         rejectLegacyReviewFields(reviewFile)
-        val batch = JsonFiles.read(reviewFile, MigrationReviewBatch::class.java)
+        val batch = this.json.read(reviewFile, MigrationReviewBatch::class.java)
         checkedInput("migration review batch") {
             requireInput(batch.runId == run.runId && batch.sourceKnowledgeId == run.knowledge.knowledgeId, "Review belongs to another run or knowledge revision")
             requireInput(batch.sourceApkSha256 == run.sourceApk.sha256 && batch.targetApkSha256 == run.targetApk.sha256, "Review APK identity mismatch")
@@ -331,7 +331,7 @@ object MigrationService {
             "javaFiles" to javaPaths.size, "javaLines" to javaPaths.sumOf { Files.lines(it).use { lines -> lines.count() } }, "javaBytes" to javaPaths.sumOf(Files::size),
             "smaliFiles" to smaliPaths.size, "smaliLines" to smaliPaths.sumOf { Files.lines(it).use { lines -> lines.count() } }, "smaliBytes" to smaliPaths.sumOf(Files::size),
             "incompleteClasses" to cachedEvidence.count { it.incomplete })
-        JsonFiles.writeNew(out.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "migration-report", "runId" to run.runId,
+        this.json.writeNew(out.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "migration-report", "runId" to run.runId,
             "sourceKnowledgeId" to run.knowledge.knowledgeId, "knowledgeId" to knowledge.knowledgeId, "sourceApk" to run.sourceApk, "targetApk" to run.targetApk,
             "reviewRevisions" to reviews.mapValues { it.value.revisionId }, "evidenceMetrics" to evidenceMetrics, "methodArtifacts" to methodArtifacts,
             "methodArtifactSource" to run.methodArtifactSource,
@@ -354,7 +354,7 @@ object MigrationService {
 
     internal fun currentDecisions(dir: Path, run: MigrationRun): List<MigrationDecision> = decisions(dir, run, ReviewStore.latest(dir, run.runId))
     private fun decisions(dir: Path, run: MigrationRun, latest: Map<String, StoredReview>): List<MigrationDecision> = checkedInput("migration review history") {
-        val reviews = latest.mapValues { (_, stored) -> stored.revisionId to JsonFiles.gson.fromJson(stored.payload, MigrationReview::class.java) }
+        val reviews = latest.mapValues { (_, stored) -> stored.revisionId to this.json.gson.fromJson(stored.payload, MigrationReview::class.java) }
         val evidence = EvidenceFiles.available(dir, run.runId).associateBy { it.evidenceId }
         DecisionPolicy.decide(run, reviews, evidence)
     }
@@ -383,7 +383,7 @@ object MigrationService {
                 validateRuleJson(item)
             }
         }
-        JsonFiles.read(path, MigrationRulesFile::class.java)
+        this.json.read(path, MigrationRulesFile::class.java)
     }
     internal fun effectiveRules(knowledge: VersionKnowledge, overrides: List<MigrationRuleOverride>, targetBase: VersionKnowledge? = null): Map<String, RuleRevision> = checkedInput("migration rule overrides") {
         requireInput(overrides.map { it.semanticId }.distinct().size == overrides.size, "Duplicate rule override targets")
@@ -393,7 +393,7 @@ object MigrationService {
             requireInput(change.expectedRevision == null || change.expectedRevision == entry.ruleRevision?.revisionId, "Rule override expectedRevision does not match source knowledge")
             val rule = RuleProofs.revision(change.locators, change.strategy)
             requireInput(rule.resultKind == EntityKind.CLASS, "Rename rule must return a class")
-            StrategyRegistry.validate(rule)
+            registry.validate(rule)
         }
         val changes = overrides.associateBy { it.semanticId }
         entries.mapValues { (id, entry) ->
@@ -402,7 +402,7 @@ object MigrationService {
                 ?: requireNotNull(entry.ruleRevision) { "Missing current rule revision" }
             RuleProofs.validate(revision)
             requireInput(revision.resultKind == EntityKind.CLASS, "Migration rename rule must return a class")
-            StrategyRegistry.validate(revision)
+            registry.validate(revision)
             revision
         }.toSortedMap()
     }
@@ -424,7 +424,7 @@ object MigrationService {
             requireInput(change.expectedRevision == null || change.expectedRevision == (original[change.key]?.rule ?: base[change.key]?.rule)?.revisionId, "Anchor expectedRevision differs from frozen source")
             rules[change.key] = RuleProofs.revision(change.locators, change.strategy)
         }
-        rules.values.forEach(StrategyRegistry::validate)
+        rules.values.forEach(registry::validate)
         rules.toSortedMap()
     }
 
@@ -457,7 +457,7 @@ object MigrationService {
     private fun validateDependencyDefinitions(targets: List<RuleRevision>, definitions: Map<String, RuleRevision>) {
         RuleProofs.validateDependencies(definitions, targets, emptyList())
         (targets + definitions.values).forEach { rule ->
-            StrategyRegistry.validateDependencyDefinitions(rule, definitions)
+            registry.validateDependencyDefinitions(rule, definitions)
         }
     }
 

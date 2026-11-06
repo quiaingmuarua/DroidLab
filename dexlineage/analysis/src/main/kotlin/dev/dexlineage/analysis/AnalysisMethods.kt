@@ -1,7 +1,5 @@
 package dev.dexlineage.analysis
 
-import dev.dexlineage.analysis.messages.*
-
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import dev.dexlineage.io.*
@@ -19,6 +17,7 @@ data class AnalysisMethodPlan(val methodId: String, val profileFile: Artifact, v
 /** A compiled analysis method interprets facts and proposes work. It cannot publish a binding. */
 interface AnalysisMethod {
     val id: String
+    val implementationClasses: List<Class<*>> get() = listOf(javaClass)
     val requiresSeeds: Boolean get() = false
     fun validate(profile: AnalysisProfile)
     fun leads(apk: Artifact, profile: AnalysisProfile, facts: List<MatchFact>): List<DiscoveryLead>
@@ -37,8 +36,12 @@ interface AnalysisMethod {
     fun taskDetails(task: AnalysisTask): JsonObject = JsonObject()
 }
 
-object AnalysisMethods {
-    private val methods: Map<String, AnalysisMethod> = register(listOf(ProfileAnalysisMethod, MessagesGrpcAnalysisMethod, MessagesProtoAnalysisMethod))
+class AnalysisMethods(private val registry: StrategyRegistry, private val json: JsonCodec,
+    extensions: List<AnalysisMethod> = emptyList(), private val codecs: List<AnalysisCodecContribution> = emptyList()) {
+    private val methods: Map<String, AnalysisMethod> = register(listOf(ProfileAnalysisMethod(registry, json)) + extensions)
+    val implementationClasses: List<Class<*>> = methods.values.flatMap { listOf(it.javaClass) + it.implementationClasses }.distinct()
+    val registeredIds: Set<String> = methods.keys.toSet()
+    val implementationIdentities: List<String> = methods.values.map { "analysis-method:${it.id}=${it.javaClass.name}" }
     internal fun register(values: List<AnalysisMethod>): Map<String, AnalysisMethod> {
         requireInput(values.all { it.id.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]*")) }, "Invalid Analysis method ID")
         requireInput(values.map { it.id }.distinct().size == values.size, "Duplicate Analysis method ID")
@@ -49,7 +52,7 @@ object AnalysisMethods {
     fun forRun(run: AnalysisRun): AnalysisMethod = run.discovery?.profile?.let(::forProfile) ?: get("profile")
     fun selectedReviewTaskIds(run: AnalysisRun): Set<String> = forRun(run).selectedReviewTaskIds(run)
 
-    fun prepareConfig(methodId: String, configPath: Path): AnalysisMethodPlan = checkedInput("Analysis method configuration") {
+    fun prepareConfig(methodId: String, configPath: Path, readRules: (Path) -> AnalysisRuleFile): AnalysisMethodPlan = checkedInput("Analysis method configuration") {
         val config = JsonParser.parseString(Files.readString(configPath)).asJsonObject
         requireInput(config.get("schemaVersion")?.asInt == SCHEMA_VERSION, "Expected schemaVersion $SCHEMA_VERSION")
         requireInput(config.keySet().all { it in setOf("schemaVersion", "apk", "baseKnowledge", "referenceKnowledge", "profile", "seedRules", "corpus") }, "Unknown Analysis method configuration field")
@@ -62,7 +65,7 @@ object AnalysisMethods {
         method.validate(profile)
         val seedFile = path("seedRules")?.let(Digests::artifact)
         requireInput(method.requiresSeeds == (seedFile != null), if (!method.requiresSeeds) "Method $methodId does not use seed rules" else "Method $methodId requires seedRules")
-        val seed = seedFile?.let { AnalysisService.readRules(Path.of(it.path)) }
+        val seed = seedFile?.let { readRules(Path.of(it.path)) }
         requireInput(seed == null || seed.items.isEmpty() && seed.anchors.isNotEmpty() && seed.discovery == null, "Seed rules must contain only anchor definitions")
         AnalysisMethodPlan(methodId, profileFile, profile, seedFile, seed,
             listOfNotNull(profileFile, seedFile))
@@ -70,43 +73,55 @@ object AnalysisMethods {
 
     fun readProfile(path: Path): AnalysisProfile = checkedInput("Analysis discovery profile") {
         val json = JsonParser.parseString(Files.readString(path)).asJsonObject
-        AnalysisProfileWire.validateFields(json)
+        validateProfileFields(json)
         if (json.get("strategy")?.isJsonNull != false) RuleJson.validateLocator(json.get("discovery"))
         else validateStrategyJson(json.getAsJsonObject("strategy"))
         json.get("strategyTemplate")?.takeUnless { it.isJsonNull }?.asJsonObject?.let(::validateStrategyJson)
         json.get("locatorTemplate")?.takeUnless { it.isJsonNull }?.let { RuleJson.validateLocator(it, template = true) }
-        val profile = JsonFiles.read(path, AnalysisProfile::class.java)
+        val profile = this.json.read(path, AnalysisProfile::class.java)
         requireInput(profile.id.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,79}")), "Invalid profile ID")
         val level: Confidence? = profile.minConfidence
         requireInput(level != null, "Invalid confidence threshold")
         if (profile.strategy == null) RuleEngine.validate(profile.discovery) else {
             requireInput(profile.discovery.kind.isBlank(), "Discovery cannot specify both locator and strategy")
-            StrategyRegistry.validate(RuleProofs.revision(emptyList(), profile.strategy))
+            registry.validate(RuleProofs.revision(emptyList(), profile.strategy))
         }
         forProfile(profile).validate(profile)
         profile
     }
 
-    internal fun validateArtifacts(refs: List<ScenarioArtifactRef>?, compatibility: JsonObject?, profile: AnalysisProfile?, apk: Artifact, inventory: Map<String, String>) {
+    fun validateArtifacts(refs: List<ScenarioArtifactRef>?, compatibility: JsonObject?, profile: AnalysisProfile?, apk: Artifact, inventory: Map<String, String>) {
         refs.orEmpty().forEach { requireInput(it.kind.isNotBlank(), "Empty method artifact kind"); Digests.verify(Artifact(it.path, it.sha256)) }
         (profile?.let(::forProfile) ?: get("profile")).validateArtifacts(refs.orEmpty(), compatibility, apk, inventory)
     }
 
-    internal fun copyArtifacts(refs: List<ScenarioArtifactRef>, out: Path): List<ScenarioArtifactRef>? {
-        if (refs.isEmpty()) return null
-        val folder = out.resolve("method-artifacts"); Files.createDirectories(folder)
-        return refs.distinct().mapIndexed { index, ref ->
-            Digests.verify(Artifact(ref.path, ref.sha256))
-            val path = folder.resolve("$index-${ref.sha256}.json")
-            if (!Files.exists(path)) Files.copy(Path.of(ref.path), path)
-            ScenarioArtifactRef(ref.kind, path.toAbsolutePath().normalize().toString(), ref.sha256)
+    companion object {
+        fun copyArtifacts(refs: List<ScenarioArtifactRef>, out: Path): List<ScenarioArtifactRef>? {
+            if (refs.isEmpty()) return null
+            val folder = out.resolve("method-artifacts"); Files.createDirectories(folder)
+            return refs.distinct().mapIndexed { index, ref ->
+                Digests.verify(Artifact(ref.path, ref.sha256))
+                val path = folder.resolve("$index-${ref.sha256}.json")
+                if (!Files.exists(path)) Files.copy(Path.of(ref.path), path)
+                ScenarioArtifactRef(ref.kind, path.toAbsolutePath().normalize().toString(), ref.sha256)
+            }
+        }
+
+        fun validateCopiedArtifacts(refs: List<ScenarioArtifactRef>, out: Path): List<ScenarioArtifactRef> = refs.distinct().mapIndexed { index, ref ->
+            val path = out.resolve("method-artifacts/$index-${ref.sha256}.json").toAbsolutePath().normalize()
+            Digests.verify(Artifact(path.toString(), ref.sha256))
+            ScenarioArtifactRef(ref.kind, path.toString(), ref.sha256)
         }
     }
 
-    internal fun validateCopiedArtifacts(refs: List<ScenarioArtifactRef>, out: Path): List<ScenarioArtifactRef> = refs.distinct().mapIndexed { index, ref ->
-        val path = out.resolve("method-artifacts/$index-${ref.sha256}.json").toAbsolutePath().normalize()
-        Digests.verify(Artifact(path.toString(), ref.sha256))
-        ScenarioArtifactRef(ref.kind, path.toString(), ref.sha256)
+    private fun validateProfileFields(value: JsonObject) {
+        val fields = setOf("schemaVersion", "id", "discovery", "nameCapture", "locatorTemplate", "minConfidence",
+            "strategy", "strategyTemplate", "parameterCaptures", "method") + codecs.flatMap { it.profileFields }
+        requireInput(value.keySet().all { it in fields }, "Unknown discovery profile field")
+        value.get("method")?.takeUnless { it.isJsonNull }?.asJsonObject?.let {
+            requireInput(it.keySet().all { key -> key in setOf("methodId", "parameters") }, "Unknown Analysis method setting")
+        }
+        codecs.forEach { it.validateProfile(value) }
     }
 
     private fun validateStrategyJson(value: JsonObject) {
@@ -114,7 +129,7 @@ object AnalysisMethods {
     }
 }
 
-private object ProfileAnalysisMethod : AnalysisMethod {
+private class ProfileAnalysisMethod(private val registry: StrategyRegistry, private val json: JsonCodec) : AnalysisMethod {
     override val id = "profile"
     override fun validate(profile: AnalysisProfile) {
         requireInput(profile.method?.parameters?.size() in listOf(null, 0), "Profile method has no method-specific parameters")
@@ -128,7 +143,7 @@ private object ProfileAnalysisMethod : AnalysisMethod {
                 requireInput(parameter.isNotBlank() && capture.isNotBlank(), "Empty discovery parameter/capture key")
                 parameters.addProperty(parameter, "capture-value")
             }
-            StrategyRegistry.validate(RuleProofs.revision(emptyList(), template.copy(parameters = parameters)))
+            registry.validate(RuleProofs.revision(emptyList(), template.copy(parameters = parameters)))
         }
         profile.locatorTemplate?.let { template ->
             RuleEngine.validate(template)
@@ -140,7 +155,7 @@ private object ProfileAnalysisMethod : AnalysisMethod {
         .filter { it.status != MatchStatus.FAIL }.groupBy { it.owner }.entries.sortedBy { it.key.descriptor }.flatMap { (owner, ownerFacts) ->
             val passing = ownerFacts.filter { it.status == MatchStatus.PASS }
             val groups = if (passing.isEmpty()) listOf(emptyMap<String, String>() to ownerFacts) else passing.groupBy { it.captures.toSortedMap() }.toList()
-            groups.map { (captures, matches) -> DiscoveryLead(Digests.text("analysis-lead\n${apk.sha256}\n${owner.descriptor}\n${JsonFiles.encode(captures)}"),
+            groups.map { (captures, matches) -> DiscoveryLead(Digests.text("analysis-lead\n${apk.sha256}\n${owner.descriptor}\n${json.encode(captures)}"),
                 owner, profile.nameCapture?.let(captures::get), captures, matches) }
         }.sortedBy { it.key }
 

@@ -2,10 +2,10 @@ package dev.dexlineage.rules.facts
 
 import jadx.api.plugins.input.insns.InsnIndexType
 import jadx.api.plugins.input.insns.Opcode
-import dev.dexlineage.rules.facts.DexFactSession.*
+import dev.dexlineage.rules.facts.ApkFacts.*
 
 /** Bounded, conservative local value flow. Unsupported control flow never supplies definite facts. */
-internal sealed interface Value {
+sealed interface Value {
     data object Unknown : Value
     data class Text(val value: String) : Value
     data class ClassLiteral(val type: String) : Value
@@ -18,12 +18,12 @@ internal sealed interface Value {
     /** A finite identity for a call whose argument tree exceeded the local expression budget. */
     data class CallResult(val site: Int, val method: MethodId) : Value
 }
-internal data class CallEvent(val offset: Int, val method: MethodId, val receiver: Value?, val args: List<Value>,
+data class CallEvent(val offset: Int, val method: MethodId, val receiver: Value?, val args: List<Value>,
     val fields: Map<Field, Value>, val arrays: Map<Value.Array, Map<Int, Value>>, val constructions: Map<Value, CallEvent>)
-internal data class WriteEvent(val offset: Int, val field: Field, val receiver: Value?, val value: Value)
-internal data class ReturnEvent(val offset: Int, val value: Value)
-internal data class ArrayEffect(val offset: Int, val array: Value.Array, val precedingCalls: Set<Int>, val reason: String)
-internal data class RawTrace(val complete: Boolean, val reason: String?, val calls: List<CallEvent>, val writes: List<WriteEvent>,
+data class WriteEvent(val offset: Int, val field: Field, val receiver: Value?, val value: Value)
+data class ReturnEvent(val offset: Int, val value: Value)
+data class ArrayEffect(val offset: Int, val array: Value.Array, val precedingCalls: Set<Int>, val reason: String)
+data class RawTrace(val complete: Boolean, val reason: String?, val calls: List<CallEvent>, val writes: List<WriteEvent>,
     val returns: List<ReturnEvent>, val constructions: Map<Value, CallEvent>, val arrayEffects: List<ArrayEffect> = emptyList()) {
     companion object {
         private data class Insn(val op: Opcode, val offset: Int, val regs: List<Int>, val resultReg: Int,
@@ -31,7 +31,7 @@ internal data class RawTrace(val complete: Boolean, val reason: String?, val cal
         private data class State(val registers: Map<Int, Value>, val result: Value = Value.Unknown,
             val fields: Map<Value, Map<Field, Value>> = emptyMap(), val arrays: Map<Value.Array, Map<Int, Value>> = emptyMap(),
             val constructors: Map<Value, CallEvent> = emptyMap())
-        fun read(method: Method): RawTrace {
+        internal fun read(method: DexMethod): RawTrace {
             val reader = method.code ?: return RawTrace(false, "Method has no readable body", emptyList(), emptyList(), emptyList(), emptyMap())
             val insns = mutableListOf<Insn>()
             reader.visitInstructions { i ->

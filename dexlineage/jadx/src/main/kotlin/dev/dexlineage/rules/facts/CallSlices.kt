@@ -1,13 +1,13 @@
 package dev.dexlineage.rules.facts
 
 import dev.dexlineage.io.ExecutionException
-import dev.dexlineage.rules.facts.DexFactSession.*
+import dev.dexlineage.rules.facts.ApkFacts.*
 import jadx.api.plugins.input.insns.InsnIndexType
 import jadx.api.plugins.input.insns.Opcode
 import jadx.api.plugins.input.insns.custom.ISwitchPayload
 
-internal data class SliceUncertainty(val offset: Int?, val reason: String, val relevantCallOffsets: Set<Int>? = null)
-internal data class CallSliceResult(val paths: List<RawTrace>, val uncertainties: List<SliceUncertainty>)
+data class SliceUncertainty(val offset: Int?, val reason: String, val relevantCallOffsets: Set<Int>? = null)
+data class CallSliceResult(val paths: List<RawTrace>, val uncertainties: List<SliceUncertainty>)
 
 /** Bounded path-sensitive call/return facts. No domain format or selector semantics live here.
  * Each path owns its registers, allocations and pre-call array snapshots; branches are never merged.
@@ -28,7 +28,7 @@ internal object CallSlices {
         val escapedArrays: Set<Value.Array> = emptySet(), val arrayEffects: List<ArrayEffect> = emptyList(),
         val visited: Set<Int> = emptySet())
 
-    fun read(method: Method): CallSliceResult {
+    fun read(method: DexMethod): CallSliceResult {
         val reader = method.code ?: return CallSliceResult(emptyList(), listOf(SliceUncertainty(null, "Method has no readable body")))
         val insns = mutableListOf<Insn>()
         reader.visitInstructions { i ->

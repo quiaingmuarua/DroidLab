@@ -1,6 +1,6 @@
 # DexLineage
 
-DexLineage is a reusable APK analysis project. Version 0.4 provides two scenes:
+DexLineage is an APK analysis tool used through its CLI or public JVM library. Version 0.4 provides two scenes:
 
 - **Analysis:** import manual annotations or discover clues, combine built-in matching with compiled application strategies, resolve supporting symbols within one execution, then review and publish class names.
 - **Migration:** freeze existing semantic targets, resolve their rules and dependencies in another APK, review continuity, and publish new bindings with unresolved history retained.
@@ -32,13 +32,13 @@ $cli = '.\build\install\dexlineage\bin\dexlineage.bat'
 & $cli --help
 ```
 
-The launcher lives at root `build/install/dexlineage` and retains a 3 GiB maximum heap. The `:dexlineage:test`, `:dexlineage:check`, `:dexlineage:build`, `:dexlineage:installDist` and `:dexlineage:realCaseTest` tasks aggregate this component's modules. Focused JVM tests use `./gradlew -Pandroid=false :dexlineage:analysis:test` or `:dexlineage:jadx:test`.
+The launcher lives at root `build/install/dexlineage` and retains a 3 GiB maximum heap. The `:dexlineage:test`, `:dexlineage:check`, `:dexlineage:build`, `:dexlineage:installDist` tasks aggregate this component's modules. Focused JVM tests use `./gradlew -Pandroid=false :dexlineage:analysis:test` or `:dexlineage:jadx:test`.
 
 Use `-Pandroid=false` with the DexLineage JVM tasks to avoid configuring Android modules; those tasks do not require an Android SDK or any APKs. Keep private profiles, rules, runs, reviews and reports in a private workspace outside DroidLab. The examples use `../private-research/dexlineage/` as an illustrative external location; replace it with your actual directory. APKs can stay at their existing paths. Temporary public probes may use ignored root `.runtime/`. No installed JADX GUI, exported Gradle project or model API is required.
 
 ### Android Studio
 
-Open the DroidLab repository root, use its Gradle Wrapper and JDK 21, then sync. The root settings import the five `:dexlineage:*` JVM modules and the test-only `:dexlineage:fixture-apk` Android application module (`dexlineage/fixtures/android`). Its standard source sets are `src/main`, `src/v1` and `src/v2`; select `v1Release` or `v2Release` in Build Variants. There is no nested Android Gradle project to import separately.
+Open the DroidLab repository root, use its Gradle Wrapper and JDK 21, then sync. The root settings import the five production JVM modules, a verification-only external consumer, and the test-only `:dexlineage:fixture-apk` Android application module (`dexlineage/fixtures/android`). Its standard source sets are `src/main`, `src/v1` and `src/v2`; select `v1Release` or `v2Release` in Build Variants. There is no nested Android Gradle project to import separately.
 
 Android modules are enabled by default. Use `-Pandroid=false` for JVM/Node-only work and `-Pandroid=true` to enable Android explicitly. Fixture tasks fail clearly if Android is disabled. Configure the Android SDK in DroidLab root `local.properties` (`sdk.dir=...`) or `ANDROID_HOME`. There is no nested settings file or Wrapper.
 
@@ -71,22 +71,15 @@ CI runs JVM checks on Ubuntu 24.04 and Windows, and the APK suite on Ubuntu 24.0
 
 `analysis run` combines the method's prerequisite matching, discovery, target matching and review-packet output in one offline execution. Direct rules need no prerequisite setup. Declared CLASS/METHOD symbols are evaluated in dependency order and reused; no intermediate knowledge publication or stage workspace is created.
 
-Copy [the gRPC configuration](examples/grpc-workspace.json), [seed definitions](examples/grpc-anchor-rules.json) and [discovery profile](examples/grpc-discovery-profile.json) into your private project. The historical example filename does not imply a recoverable workspace. [The profile configuration](examples/profile-workspace.json) supports logger discovery without seeds. Relative paths resolve from the configuration file; optional same-APK base/reference knowledge and corpus retain their existing meaning.
+Copy [the profile configuration](examples/profile-workspace.json) and [logger profile](examples/logger-profile.json) into your project. The historical filename is an input configuration, not a recoverable workspace. Paths resolve from that configuration file.
 
 ```powershell
-& $cli analysis run --method messages.grpc --config ../private-research/dexlineage/grpc-workspace.json --work ../private-research/dexlineage/topic-001
+& $cli analysis run --method profile --config ../private-research/profile-workspace.json --work ../private-research/analysis-001
 ```
 
-The result identifies one `runPath`, the discovery output when available and `packetPath`. Read its summary and evidence, copy the blank review template, and fill semantic judgments. No HIGH/ACCEPT decision is supplied. Then explicitly submit and publish:
+The invocation writes one final run, discovery results and a Review packet. Matching does not publish names. Read evidence and fill semantic fields, then explicitly submit and publish. Both scenes support `inspect --out <new-directory>`; omit `--task` with `--out` for all tasks. Interrupted work restarts in a new directory; retired status/resume commands return guidance.
 
-```powershell
-& $cli analysis submit --run '<runPath>' --review ../private-research/dexlineage/review.json
-& $cli analysis publish --run '<runPath>' --out ../private-research/dexlineage/published-001
-```
-
-Use `tasks` and `inspect` to read saved results. `analysis status/resume` are retired and return migration guidance. Interrupted or failed work is rerun in a new directory; no checkpoint adoption or automatic retry occurs. Old completed run/Review/knowledge formats remain readable and replayable; historical workspace recovery requires its original tool revision.
-
-See [one-hop Proto analysis](docs/messages-proto-relations.md) for fixed field targets and corpus input. Both scenes support `inspect --out <new-directory>` to generate a review packet; omit `--task` with `--out` to include all current tasks. This does not change matching or publication eligibility.
+Project-owned methods use the same commands through the project's composed entrypoint, as demonstrated by the [external example](examples/external/README.md).
 
 ## Analyze an APK
 
@@ -109,17 +102,13 @@ Discovery is optional. An Agent can write an [Analysis rules file](examples/anal
 
 Use `tasks --state INVALID` and `inspect` to investigate invalid results. Their candidates and diagnostics remain available; they do not require an artificial Review. Even a unique result needs actual semantic review before acceptance. Field-initializer naming requires owner and internal factory code; plain string-use rules require owner code and their actual matching evidence.
 
-## Discover Messages gRPC request and response classes
+## Compose an external project
 
-The gRPC flow starts with a verified framework class and method, then follows raw DEX call references across the APK. [The anchor example](examples/grpc-anchor-rules.json) uses one observed service/RPC to establish a descriptor METHOD, its actual Descriptor CLASS, and the unique static full-name function. The analysis method resolves this chain within its one execution; no seed publication is required. The full-name rule checks the observed `argument0 + "/" + argument1` StringBuilder implementation; an old obfuscated method name is never an input.
+The installed CLI contains built-in locators and method-signature matching only. Project implementations are not registered inside the tool. A project main constructs `DexLineageRuntime(handlers, methods, codecs)` and calls the same `runCli(args, runtime)`. Analysis, Migration, Review and publication share that instance; no mutable global registration or dynamic JAR loading is required.
 
-Use the `messages.grpc` method above for prerequisite discovery and target matching in one invocation. The lower-level `analysis discover` command remains available when you deliberately provide an existing same-APK anchor package.
+The [external consumer example](examples/external/README.md) compiles only against installed JARs. It exercises a dependency-based handler and an AnalysisMethod, including publication and migration, without Kotlin internal or friend access. Extend from those public contracts, not by editing the tool registry. Unknown extension IDs fail explicitly when only the core CLI is used.
 
-Discovery writes `discovery.json`, `rpc-catalog.json` and class rule drafts. It records all direct calls to the framework anchor, including dynamic/configuration uses and unsupported constructions. The reader binds the name, builder and both marshaller roles to one Descriptor construction. Request/response types come from their respective default instances, with no assumption about field order, constructor parameter order, outer method return type or unary-only RPCs.
-
-`method.parameters.reviewServices` selects review scope, not the matching domain. Every discovered service remains in the catalogue and mechanical matching. Shared Proto classes become one task with all exact service/RPC/role selectors; names suggested from RPC roles are not recovered source names. Inspect the selected tasks in batches, read their owner and dependency evidence, then use the usual `submit / publish / knowledge verify` commands. Bulk RPC rules defer Java/Smali presentation until inspect. Older schema-4 `rpcDrafts` profiles remain readable through the compatibility codec.
-
-`--reference-knowledge` may be repeated with explicit same-APK packages. Only after unique matching does Analysis reuse a matching confirmed binding's semantic ID and canonical name. References supply identity, not accepted Reviews, matching proofs or dependency anchors: each adopted class needs this run's evidence and Review. Publication contains base entries and newly approved entries, not the entire reference package. Conflicting identities, changed reference inputs and wrong APKs are rejected. Existing names that cannot be justified should be deferred rather than silently changed.
+App-specific handlers, catalogue code, parameter conventions and codecs belong to the consuming project. Existing Messages implementations now live in its private research project. Its project entry supplies the original strategy IDs; the core does not keep a second implementation as fallback.
 
 ## Import manual work and resolve symbol dependencies
 
@@ -130,7 +119,7 @@ Import a JADX `projectVersion=1` annotation project into a new corpus directory:
 & $cli analysis targets --corpus ..\private-research\dexlineage\manual-corpus\corpus.json --limit 20
 ```
 
-The corpus preserves class, field, method and local annotations. Class annotations become stable targets; members and local positions remain research context. Import validates original class/member references. A class target's source identity is checked after matching; it is never passed to the matcher as an expected-owner filter. Importing an annotation does not approve a name for publication. The 544 annotations / 238 classes in the private Messages audit describe that local case, not a public default or a coverage target.
+The corpus preserves class, field, method and local annotations. Class annotations become stable targets; members and local positions remain research context. Import validates original class/member references. A class target's source identity is checked after matching; it is never passed to the matcher as an expected-owner filter. Importing an annotation does not approve a name for publication.
 
 An Analysis rule item can refer to a corpus target using `corpusTargetId`. Pass `--corpus` to `analysis prepare`; `analysis targets --corpus ... --run ...` shows every manual target, including `UNCONFIGURED` items and failures. New discoveries outside the corpus are reported separately.
 
@@ -142,19 +131,7 @@ Investigate selected manual targets before writing rules:
 
 Research reads the corpus's frozen source APK and preserves owner annotations alongside raw class/member identities, strings, direct calls, field accesses and Java/Smali evidence. It batches selected targets, does not recursively explore relationships, and writes `research.json` without creating a matching run. Research can help author a rule; it is not a Resolution, and its evidence cannot be submitted as another run's Review. A partial Java rendering remains explicit while raw DEX reading failures abort the operation.
 
-Copy [the dependency example](examples/multiround-rules.json) and replace its public marker/component strings with observed inputs. It defines a logger class anchor, a current-version factory METHOD anchor and a class target that uses that factory:
-
-```powershell
-& $cli analysis prepare --apk 'D:/apks/current.apk' --rules ../private-research/dexlineage/rules.json --corpus ../private-research/dexlineage/manual-corpus/corpus.json --run ../private-research/dexlineage/analysis-001
-& $cli analysis tasks --run ../private-research/dexlineage/analysis-001 --state ALL
-& $cli analysis inspect --run ../private-research/dexlineage/analysis-001 --out ../private-research/dexlineage/review-packet
-```
-
-The logger class, its factory METHOD and the dependent class resolve in this single prepare. Each effective rule is evaluated once. Missing, ambiguous or unknown prerequisites leave their dependants as `WAITING_DEPENDENCY`, with no fabricated NO_MATCH. Unrelated rules still execute. Inspect an `anchor:<key>` to read a prerequisite directly; ordinary tasks include their dependency evidence.
-
-The compile-time registry provides Messages-oriented logger, Handler-name and RPC/Proto strategies. They take configuration and structured APK facts, not hardcoded obfuscated answers. [The RPC example](examples/rpc-rules.json) demonstrates one descriptor METHOD anchor feeding request and response class targets. Real application tags, service lists and manual names belong in the external private workspace; the strategy code and self-authored fixtures are public.
-
-[RPC related-type rules](examples/rpc-related-rules.json) use the same verified METHOD anchor to locate the constructed descriptor, its builder, and the common marshaller declaration interface. Service, RPC and label settings come from the producer rule. The strategy reads the actual construction, including when the outer RPC method returns `Object`; it does not name the outer method's return type or the concrete marshaller implementation by assumption. Any unresolved competing construction keeps related-type results UNKNOWN even when the enclosing method is unique. One prepare resolves the RPC method and its related class targets; review and publication remain explicit.
+Dependent rules declare `requires` roles referring to CLASS or METHOD anchors. One prepare evaluates available rules in dependency order, reuses shared symbols and records blocked dependants. A project handler consumes the public facts view and returns candidates, conditions and evidence. It cannot approve names or publish Mapping. The [external example](examples/external/README.md) includes this flow.
 
 ## Continue Analysis on existing knowledge
 
@@ -237,37 +214,11 @@ Evidence completeness means verifiable files, identities, hashes and review refe
 
 ## Verification and limits
 
-`knowledge verify` opens fresh DEX-only JADX with the DEX and rename-mappings plugins in read mode. It checks Mapping contents, original identities, displayed names and declarations. A successful build is not this proof.
+Ordinary JVM checks do not need an APK or Android SDK. Public fixture checks build self-authored R8 APKs, then drive the installed core or external-project CLI in child processes. Matching candidates are checked against independent R8 Mapping before predefined fixture Reviews are submitted. The external consumer is compiled from distribution JARs with no production source-project dependency.
 
-The explicit `realCaseTest` task requires local case properties; normal builds exclude it. The real case uses existing APKs and Agent-authored reviews, tests fresh matching separately from publication replay, and checks invalid ambiguity, same-APK continuation, failed-update retention, legacy upgrade and Mapping readback. It does not fabricate semantic reviews or require historical success counts.
+Project-specific scenario tests and real-case acceptance belong to the project providing the extensions. Current Messages regression is maintained there; it is not a core CLI preset. Historical rule IDs and schema-4 documents remain data, while executing their strategy or interpreting scenario-specific historical wire fields requires the corresponding project extension. Published class Mapping consumption remains available through the core.
 
-Historical saved-case verification can still read the earlier ordered-run manifests. These inputs validate retained runs/publications; they are not instructions for creating a new multi-round execution. Use a local properties file:
-
-```properties
-scenario=v04
-caseManifest=manifest.json
-acceptanceRoot=acceptance
-```
-
-The schema-4 manifest records `corpus`, ordered `analysisRounds` and `migrationRounds` (each with `run` and `output`), optional `shapeRounds`, and `upgradedV03` package paths. Paths resolve relative to the manifest. Optional `expectedAnnotationCounts`, `expectedClassTargets`, `requiredStrategyIds` and `requiredPublishedRules` make the local acceptance requirements explicit. The runner freshly checks producer anchors before using them as dependencies, reexecutes matching, replays each saved publication, then independently reads back final class mappings. Keep the manifest and all private results in the external private workspace.
-
-On Windows, very large selections can exceed the `.bat` command-line limit. Page the task list into smaller batches, or invoke the same installed CLI without the batch wrapper:
-
-```powershell
-java -Xmx3g '-Dorg.slf4j.simpleLogger.defaultLogLevel=warn' -cp 'build/install/dexlineage/lib/*' dev.dexlineage.cli.MainKt migration inspect --run ../private-research/dexlineage/my-case/target-run --task $taskIds
-```
-
-Use a new schema-4 case configuration; old v0.3 runs must be upgraded explicitly before reuse. The test's required property keys are documented by its [source](cli/src/test/kotlin/dev/dexlineage/cli/RealCaseTest.kt), and paths resolve relative to the properties file. A case configuration points to actual prepared, reviewed and published artifacts, not a candidate-answer list.
-
-```powershell
-.\gradlew.bat -Pandroid=false :dexlineage:realCaseTest "-PcaseProperties=../private-research/dexlineage/my-case/acceptance.properties"
-```
-
-Keep case configuration and acceptance records in `../private-research/dexlineage/`. Evidence-volume metrics describe generated/cached files, not automatic measurement of Agent reading. Partial code and the review's unverified scope remain visible.
-
-Commands emit JSON on stdout and diagnostics on stderr. Exit codes are `0` for completion, including invalid/pending items; `2` for invalid inputs or Review submissions; and `1` for execution failure.
-
-This version supports the two existing locator kinds and compiled strategies for current-version method signatures, logger calls, Handler naming and RPC/Proto roles. Unknown code shapes remain visible instead of being treated as proven matches. The registry is compiled into the application; there is no dynamic plugin/script loader, member renaming, GUI/MCP or model API. See [architecture and contracts](docs/architecture.md) for rule and knowledge boundaries.
+Unique matching, semantic review and runtime behavior are separate claims. Unknown code shapes remain visible; no dynamic plugin/script loader, member Rename, GUI, MCP or model API is provided. See [architecture](docs/architecture.md) and [fixture testing](docs/fixture-testing.md).
 
 ## License
 

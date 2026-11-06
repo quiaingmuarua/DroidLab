@@ -21,14 +21,15 @@ data class MigrationPacketResult(val schemaVersion: Int = SCHEMA_VERSION, val ki
     val summaryPath: String, val files: List<Artifact>)
 
 /** Packages current run facts; only the existing submit/publish path can decide continuity. */
-object ReviewPackets {
+class ReviewPackets(private val service: MigrationService = MigrationService()) {
+    private val json = service.json
     fun write(runDir: Path, taskIds: Set<String>, outDir: Path): MigrationPacketResult {
-        val run = MigrationService.readRun(runDir)
+        val run = service.readRun(runDir)
         val ids = taskIds.ifEmpty { run.tasks.map { it.taskId }.toSet() }
         requireInput(ids.all { id -> run.tasks.any { it.taskId == id } }, "Unknown migration packet task")
         createNewDirectory(outDir)
-        val records = (if (ids.isEmpty()) emptyList() else MigrationService.inspect(runDir, ids)).associateBy { it.ref }
-        val views = MigrationService.tasks(runDir, "ALL", limit = Int.MAX_VALUE).tasks.associateBy { it.taskId }
+        val records = (if (ids.isEmpty()) emptyList() else service.inspect(runDir, ids)).associateBy { it.ref }
+        val views = service.tasks(runDir, "ALL", limit = Int.MAX_VALUE).tasks.associateBy { it.taskId }
         val selected = ids.sorted().map { id ->
             val task = run.tasks.single { it.taskId == id }
             val view = views.getValue(id)
@@ -50,9 +51,9 @@ object ReviewPackets {
             sourceApkSha256 = run.sourceApk.sha256, targetApkSha256 = run.targetApk.sha256,
             engineBuildId = run.engineBuildId, tasks = selected, sharedEvidence = evidence)
         val packetPath = outDir.resolve("review-packet.json")
-        JsonFiles.writeNew(packetPath, packet)
+        json.writeNew(packetPath, packet)
         val templatePath = outDir.resolve("review-template.json")
-        Files.writeString(templatePath, JsonFiles.gson.newBuilder().serializeNulls().create().toJson(template(run, selected)) + "\n",
+        Files.writeString(templatePath, json.gson.newBuilder().serializeNulls().create().toJson(template(run, selected)) + "\n",
             java.nio.file.StandardOpenOption.CREATE_NEW)
         val summaryPath = outDir.resolve("summary.md")
         Files.writeString(summaryPath, summary(packet))
@@ -61,14 +62,14 @@ object ReviewPackets {
             summaryPath = summaryPath.toAbsolutePath().toString(),
             files = (listOf(packetPath, templatePath, summaryPath).map(Digests::artifact) +
                 evidence.flatMap { listOfNotNull(it.javaFile, it.smaliFile) }).sortedBy { it.path })
-        JsonFiles.writeNew(outDir.resolve("packet-manifest.json"), result)
+        json.writeNew(outDir.resolve("packet-manifest.json"), result)
         return result
     }
 
     fun validate(outDir: Path, runDir: Path, taskIds: Set<String> = emptySet()): MigrationPacketResult {
-        val run = MigrationService.readRun(runDir)
+        val run = service.readRun(runDir)
         val ids = taskIds.ifEmpty { run.tasks.map { it.taskId }.toSet() }.sorted()
-        val manifest = JsonFiles.read(outDir.resolve("packet-manifest.json"), MigrationPacketResult::class.java)
+        val manifest = json.read(outDir.resolve("packet-manifest.json"), MigrationPacketResult::class.java)
         requireInput(manifest.kind == "migration-review-packet-manifest" && manifest.runId == run.runId && manifest.taskIds == ids,
             "Migration packet belongs to another run or selection")
         val root = outDir.toAbsolutePath().normalize()
@@ -79,7 +80,7 @@ object ReviewPackets {
         }
         requireInput(listOf(manifest.packetPath, manifest.templatePath, manifest.summaryPath).all { p -> manifest.files.any { it.path == p } },
             "Incomplete migration packet manifest")
-        val packet = JsonFiles.read(Path.of(manifest.packetPath), MigrationReviewPacket::class.java)
+        val packet = json.read(Path.of(manifest.packetPath), MigrationReviewPacket::class.java)
         requireInput(packet.kind == "migration-review-packet" && packet.runId == run.runId &&
             packet.sourceKnowledgeId == run.knowledge.knowledgeId && packet.sourceApkSha256 == run.sourceApk.sha256 &&
             packet.targetApkSha256 == run.targetApk.sha256 && packet.engineBuildId == run.engineBuildId,
@@ -125,7 +126,7 @@ object ReviewPackets {
                     addProperty("identityReason", "")
                     add("changes", JsonArray())
                     add("unverified", JsonArray())
-                    add("evidenceIds", JsonFiles.gson.toJsonTree(item.evidenceIds))
+                    add("evidenceIds", json.gson.toJsonTree(item.evidenceIds))
                     item.latestRevision?.let { addProperty("supersedes", it) }
                 })
             }

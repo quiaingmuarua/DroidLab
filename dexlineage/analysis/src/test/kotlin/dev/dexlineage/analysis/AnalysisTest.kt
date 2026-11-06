@@ -10,6 +10,8 @@ import java.nio.file.Path
 import kotlin.test.*
 
 class AnalysisTest {
+    private val service = AnalysisService()
+
     @TempDir lateinit var temp: Path
     private val inventory = mapOf("La;" to "classes.dex", "Lb;" to "classes.dex", "Lc;" to "classes.dex", "Lfactory;" to "classes.dex")
     private fun apk() = Digests.artifact(temp.resolve("fixture.apk").also { if (!Files.exists(it)) Files.writeString(it, "identity fixture only; no synthetic APK") })
@@ -25,7 +27,7 @@ class AnalysisTest {
                      base: VersionKnowledge? = null, literal: String = "signal"): AnalysisTask {
         val proof = resolution(apk, owners, literal)
         val item = AnalysisRuleItem(key, semanticId, "Component", proof.rule.locators)
-        return AnalysisService.makeTask(apk, item, proof.rule, proof, null, base)
+        return service.makeTask(apk, item, proof.rule, proof, null, base)
     }
     private fun run(tasks: List<AnalysisTask>, apk: Artifact, base: VersionKnowledge? = null, dirName: String = "run"): Pair<Path, AnalysisRun> {
         val dir = temp.resolve(dirName)
@@ -50,7 +52,7 @@ class AnalysisTest {
     private fun submit(dir: Path, run: AnalysisRun, filename: String, items: List<AnalysisReview>): AnalysisSubmitResult {
         val file = temp.resolve(filename)
         JsonFiles.writeNew(file, AnalysisReviewBatch(runId = run.runId, apkSha256 = run.apk.sha256, items = items))
-        return AnalysisService.submit(dir, file)
+        return service.submit(dir, file)
     }
     private fun base(apk: Artifact): VersionKnowledge {
         val dir = temp.resolve("base")
@@ -67,20 +69,20 @@ class AnalysisTest {
     @Test fun `two entities remain invalid despite distinct aliases or rejecting a rival task`() {
         val apk = apk()
         val (dir, run) = run(listOf(task(apk, "first", listOf("La;", "Lb;")), task(apk, "second", listOf("La;", "Lb;"))), apk)
-        assertEquals(2, AnalysisService.tasks(dir, "INVALID").total)
-        assertEquals(0, AnalysisService.tasks(dir).total)
+        assertEquals(2, service.tasks(dir, "INVALID").total)
+        assertEquals(0, service.tasks(dir).total)
         assertFailsWith<ValidationException> { submit(dir, run, "bad.json", listOf(review(run, run.tasks[0], "One"), review(run, run.tasks[1], "Two"))) }
         submit(dir, run, "reject.json", listOf(review(run, run.tasks[1], "Two", ReviewAction.REJECT)))
         assertFailsWith<ValidationException> { submit(dir, run, "bad-alone.json", listOf(review(run, run.tasks[0], "One"))) }
-        assertEquals(2, AnalysisService.tasks(dir, "INVALID").total)
-        assertEquals(0, AnalysisService.publish(dir, temp.resolve("invalid-output")).confirmed)
+        assertEquals(2, service.tasks(dir, "INVALID").total)
+        assertEquals(0, service.publish(dir, temp.resolve("invalid-output")).confirmed)
     }
 
     @Test fun `unique result needs review and old resolution cannot authorize a new rule`() {
         val apk = apk()
         val (dir, run) = run(listOf(task(apk)), apk)
-        assertEquals(1, AnalysisService.tasks(dir).total)
-        assertEquals(0, AnalysisService.publish(dir, temp.resolve("unreviewed")).confirmed)
+        assertEquals(1, service.tasks(dir).total)
+        assertEquals(0, service.publish(dir, temp.resolve("unreviewed")).confirmed)
         assertFailsWith<ValidationException> { submit(dir, run, "stale-proof.json", listOf(review(run).copy(resolutionId = "old"))) }
         assertFailsWith<ValidationException> { submit(dir, run, "stale-rule.json", listOf(review(run).copy(ruleRevisionId = "old"))) }
         assertFailsWith<ValidationException> { submit(dir, run, "wrong-evidence.json", listOf(review(run).copy(evidenceIds = listOf("bad")))) }
@@ -90,7 +92,7 @@ class AnalysisTest {
         val apk = apk()
         val (dir, run) = run(listOf(task(apk)), apk)
         submit(dir, run, "review.json", listOf(review(run, name = "CorrectedName")))
-        val published = AnalysisService.publish(dir, temp.resolve("output"))
+        val published = service.publish(dir, temp.resolve("output"))
         val entry = KnowledgeFiles.read(Path.of(published.knowledgePath)).entries.single()
         assertEquals("CorrectedName", entry.name)
         assertEquals("signal", entry.captures["literal"])
@@ -108,15 +110,15 @@ class AnalysisTest {
         val proof = RuleProofs.create(apk.sha256, rule, "test-build", listOf(MatchFact(owner, MatchStatus.PASS,
             listOf(FactorResult("anchor", MatchStatus.PASS, "same call")), mapOf("component" to "signal"), binding)))
         val input = AnalysisRuleItem("logger", proposedName = "Component", locators = rule.locators)
-        val target = AnalysisService.makeTask(apk, input, rule, proof, null, null)
+        val target = service.makeTask(apk, input, rule, proof, null, null)
         val (dir, run) = run(listOf(target), apk)
         val ownerOnly = review(run)
         submit(dir, run, "owner-only.json", listOf(ownerOnly))
-        assertEquals("owner_or_factory_evidence_missing", AnalysisService.tasks(dir, "DEFERRED").items.single().reason)
+        assertEquals("owner_or_factory_evidence_missing", service.tasks(dir, "DEFERRED").items.single().reason)
         val prior = ReviewStore.latest(dir, run.runId).getValue(target.taskId).revisionId
         val both = ownerOnly.copy(evidenceIds = ownerOnly.evidenceIds + Identities.evidenceId(run.runId, ref(apk, "Lfactory;")), supersedes = prior)
         submit(dir, run, "with-factory.json", listOf(both))
-        assertEquals(1, AnalysisService.tasks(dir, "ACCEPTED").total)
+        assertEquals(1, service.tasks(dir, "ACCEPTED").total)
     }
 
     @Test fun `discovery owner is an assertion after global lookup and cannot hide outside competitors`() {
@@ -128,10 +130,10 @@ class AnalysisTest {
             matchCounts = emptyMap(), conditionCounts = emptyMap(), analysisDiagnostics = emptyList(), analysisMillis = 0, createdAt = "now")
         val onlyOther = resolution(apk, listOf("Lb;"))
         val input = AnalysisRuleItem("lead", locators = onlyOther.rule.locators, discoveryKey = "lead")
-        val mismatch = AnalysisService.makeTask(apk, input, onlyOther.rule, onlyOther, discovery, null)
+        val mismatch = service.makeTask(apk, input, onlyOther.rule, onlyOther, discovery, null)
         assertEquals("discovery_owner_mismatch", mismatch.invalidReason)
         val outside = resolution(apk, listOf("La;", "Lb;"))
-        val ambiguous = AnalysisService.makeTask(apk, input, outside.rule, outside, discovery, null)
+        val ambiguous = service.makeTask(apk, input, outside.rule, outside, discovery, null)
         assertEquals("resolution_ambiguous", ambiguous.invalidReason)
     }
 
@@ -140,26 +142,26 @@ class AnalysisTest {
         val p = AnalysisProfile(id = "scope", discovery = Locator("string-use", "scope"), nameCapture = "literal")
         val path = temp.resolve("profile.json")
         JsonFiles.writeNew(path, p)
-        assertNull(AnalysisService.readProfile(path).locatorTemplate)
-        assertEquals(2, AnalysisService.createLeads(apk, p, listOf(fact(apk, "La;", "scope"), fact(apk, "Lb;", "scope"))).size)
+        assertNull(service.readProfile(path).locatorTemplate)
+        assertEquals(2, service.createLeads(apk, p, listOf(fact(apk, "La;", "scope"), fact(apk, "Lb;", "scope"))).size)
         val draft = temp.resolve("draft-name.json")
         JsonFiles.writeNew(draft, AnalysisRuleFile(items = listOf(AnalysisRuleItem("draft", proposedName = "raw component / hint", locators = listOf(Locator("string-use", "scope"))))))
-        assertEquals("raw component / hint", AnalysisService.readRules(draft).items.single().proposedName)
+        assertEquals("raw component / hint", service.readRules(draft).items.single().proposedName)
     }
 
     @Test fun `target descriptor is not an accepted rule input`() {
         val p = temp.resolve("forged.json")
         Files.writeString(p, """{"schemaVersion":4,"kind":"analysis-rules","items":[{"key":"x","expectedOwner":"La;","locators":[{"kind":"string-use","anchor":"x"}]}]}""")
-        assertFailsWith<ValidationException> { AnalysisService.readRules(p) }
+        assertFailsWith<ValidationException> { service.readRules(p) }
     }
 
     @Test fun `unknown nested rule fields and misspelled profile options do not weaken constraints`() {
         val rules = temp.resolve("typo-rules.json")
         Files.writeString(rules, """{"schemaVersion":4,"kind":"analysis-rules","items":[{"key":"x","locators":[{"kind":"field-initializer","anchor":"x","factors":[{"kind":"method-signature","returnSameAsField":true,"parameterType":["Ljava/lang/String;"]}]}]}]}""")
-        assertFailsWith<ValidationException> { AnalysisService.readRules(rules) }
+        assertFailsWith<ValidationException> { service.readRules(rules) }
         val profile = temp.resolve("typo-profile.json")
         Files.writeString(profile, """{"schemaVersion":4,"id":"x","discovery":{"kind":"string-use","anchor":"x"},"locator_template":{}}""")
-        assertFailsWith<ValidationException> { AnalysisService.readProfile(profile) }
+        assertFailsWith<ValidationException> { service.readProfile(profile) }
     }
 
     @Test fun `base identity reused and failed replacement leaves prior knowledge intact`() {
@@ -169,8 +171,8 @@ class AnalysisTest {
         assertEquals("stable-id", update.semanticId)
         val failed = task(apk, "failed", owners = emptyList(), semanticId = "stable-id", base = base)
         val (dir, run) = run(listOf(failed), apk, base)
-        assertEquals(1, AnalysisService.tasks(dir, "INVALID").total)
-        val published = AnalysisService.publish(dir, temp.resolve("kept"))
+        assertEquals(1, service.tasks(dir, "INVALID").total)
+        val published = service.publish(dir, temp.resolve("kept"))
         val result = KnowledgeFiles.read(Path.of(published.knowledgePath))
         assertEquals(base.entries, result.entries)
         assertEquals(base.knowledgeId, result.parentKnowledgeId)
@@ -182,11 +184,11 @@ class AnalysisTest {
         val base = base(apk)
         val entry = base.entries.single()
         val input = AnalysisRuleItem("existing", semanticId = entry.semanticId, proposedName = entry.name, locators = entry.locators)
-        val target = AnalysisService.makeTask(apk, input, entry.ruleRevision!!, entry.resolution, null, base, inherited = true)
+        val target = service.makeTask(apk, input, entry.ruleRevision!!, entry.resolution, null, base, inherited = true)
         val (dir, current) = run(listOf(target), apk, base)
-        assertEquals(1, AnalysisService.tasks(dir, "INHERITED").total)
-        assertEquals(0, AnalysisService.tasks(dir).total)
-        val published = AnalysisService.publish(dir, temp.resolve("inherited"))
+        assertEquals(1, service.tasks(dir, "INHERITED").total)
+        assertEquals(0, service.tasks(dir).total)
+        val published = service.publish(dir, temp.resolve("inherited"))
         assertEquals(0, published.acceptedUpdates)
         assertEquals(base.entries, KnowledgeFiles.read(Path.of(published.knowledgePath)).entries)
         assertFailsWith<ValidationException> { submit(dir, current, "unnecessary.json", listOf(review(current))) }
@@ -198,7 +200,7 @@ class AnalysisTest {
         val updateTask = task(apk, semanticId = "stable-id", base = base, literal = "replacement")
         val (dir, run) = run(listOf(updateTask), apk, base)
         submit(dir, run, "replace.json", listOf(review(run, name = "Existing")))
-        val entry = KnowledgeFiles.read(Path.of(AnalysisService.publish(dir, temp.resolve("replacement")).knowledgePath)).entries.single()
+        val entry = KnowledgeFiles.read(Path.of(service.publish(dir, temp.resolve("replacement")).knowledgePath)).entries.single()
         assertEquals("stable-id", entry.semanticId)
         assertEquals(listOf(Locator("string-use", "replacement")), entry.locators)
         assertNotEquals(base.entries.single().ruleRevision, entry.ruleRevision)
@@ -223,8 +225,8 @@ class AnalysisTest {
         val base = base(apk)
         val (dir, run) = run(listOf(task(apk, "new-one", listOf("Lb;"), base = base), task(apk, "new-two", listOf("Lc;"), base = base)), apk, base)
         submit(dir, run, "conflicts.json", run.tasks.map { review(run, it, "Existing") })
-        assertEquals(2, AnalysisService.tasks(dir, "DEFERRED").total)
-        val result = KnowledgeFiles.read(Path.of(AnalysisService.publish(dir, temp.resolve("conflict-output")).knowledgePath))
+        assertEquals(2, service.tasks(dir, "DEFERRED").total)
+        val result = KnowledgeFiles.read(Path.of(service.publish(dir, temp.resolve("conflict-output")).knowledgePath))
         assertEquals(base.entries, result.entries)
     }
 
@@ -232,8 +234,8 @@ class AnalysisTest {
         val apk = apk()
         val (dir, run) = run(listOf(task(apk, "one"), task(apk, "two")), apk)
         submit(dir, run, "two-updates.json", run.tasks.mapIndexed { i, t -> review(run, t, "Component$i") })
-        assertEquals(2, AnalysisService.tasks(dir, "DEFERRED").total)
-        assertEquals(0, AnalysisService.publish(dir, temp.resolve("no-winner")).confirmed)
+        assertEquals(2, service.tasks(dir, "DEFERRED").total)
+        assertEquals(0, service.publish(dir, temp.resolve("no-winner")).confirmed)
     }
 
     @Test fun `idempotent submit explicit revisions restore historical publication without rolling back queue`() {
@@ -241,15 +243,15 @@ class AnalysisTest {
         val (dir, run) = run(listOf(task(apk)), apk)
         val accepted = review(run)
         val first = submit(dir, run, "accepted.json", listOf(accepted))
-        assertEquals(first.revisions, AnalysisService.submit(dir, temp.resolve("accepted.json")).revisions)
-        val initial = AnalysisService.publish(dir, temp.resolve("published"))
+        assertEquals(first.revisions, service.submit(dir, temp.resolve("accepted.json")).revisions)
+        val initial = service.publish(dir, temp.resolve("published"))
         assertFailsWith<ValidationException> { submit(dir, run, "stale.json", listOf(accepted.copy(action = ReviewAction.REJECT))) }
         submit(dir, run, "rejected.json", listOf(accepted.copy(action = ReviewAction.REJECT, supersedes = first.revisions.getValue(accepted.taskId))))
-        assertEquals(1, AnalysisService.tasks(dir, "REJECTED").total)
-        val replay = AnalysisService.publish(dir, temp.resolve("replay"), Path.of(initial.reportPath))
+        assertEquals(1, service.tasks(dir, "REJECTED").total)
+        val replay = service.publish(dir, temp.resolve("replay"), Path.of(initial.reportPath))
         assertEquals(initial.knowledgeId, replay.knowledgeId)
         assertEquals(Files.readString(Path.of(initial.mappingPath)), Files.readString(Path.of(replay.mappingPath)))
-        assertEquals(1, AnalysisService.tasks(dir, "REJECTED").total)
+        assertEquals(1, service.tasks(dir, "REJECTED").total)
     }
 
     @Test fun `batch with later stale supersedes never partially saves`() {
@@ -276,8 +278,8 @@ class AnalysisTest {
         val apk = apk()
         val (dir, run) = run(listOf(task(apk)), apk)
         val out = temp.resolve("packet")
-        val result = ReviewPackets.write(dir, setOf("target"), out)
-        assertEquals(result, ReviewPackets.validate(out, dir, setOf("target")))
+        val result = ReviewPackets(service).write(dir, setOf("target"), out)
+        assertEquals(result, ReviewPackets(service).validate(out, dir, setOf("target")))
         val packet = JsonFiles.read(Path.of(result.packetPath), ReviewPacket::class.java)
         assertEquals(run.tasks.single(), packet.tasks.single().task)
         assertEquals(listOf(Identities.evidenceId(run.runId, ref(apk, "La;"))), packet.tasks.single().requiredEvidenceIds)
@@ -287,19 +289,19 @@ class AnalysisTest {
         assertTrue(item.get("action") == null || item.get("action").isJsonNull)
         assertTrue(item.get("level") == null || item.get("level").isJsonNull)
         assertEquals("", item.get("rationale").asString)
-        assertFailsWith<ValidationException> { AnalysisService.submit(dir, Path.of(result.templatePath)) }
+        assertFailsWith<ValidationException> { service.submit(dir, Path.of(result.templatePath)) }
         assertTrue(ReviewStore.latest(dir, run.runId).isEmpty())
         Files.writeString(Path.of(packet.sharedEvidence.single().javaFile.path), "changed")
-        assertFailsWith<ValidationException> { ReviewPackets.validate(out, dir, setOf("target")) }
+        assertFailsWith<ValidationException> { ReviewPackets(service).validate(out, dir, setOf("target")) }
     }
 
     @Test fun `empty review scope is a complete packet and invalid tasks need no fabricated review`() {
         val apk = apk()
         val (dir, _) = run(listOf(task(apk, owners = listOf("La;", "Lb;"))), apk)
-        val empty = ReviewPackets.write(dir, emptySet(), temp.resolve("empty-packet"))
-        ReviewPackets.validate(temp.resolve("empty-packet"), dir, emptySet())
+        val empty = ReviewPackets(service).write(dir, emptySet(), temp.resolve("empty-packet"))
+        ReviewPackets(service).validate(temp.resolve("empty-packet"), dir, emptySet())
         assertTrue(JsonFiles.read(Path.of(empty.packetPath), ReviewPacket::class.java).tasks.isEmpty())
-        val invalid = ReviewPackets.write(dir, setOf("target"), temp.resolve("invalid-packet"))
+        val invalid = ReviewPackets(service).write(dir, setOf("target"), temp.resolve("invalid-packet"))
         val template = JsonFiles.read(Path.of(invalid.templatePath), AnalysisReviewBatch::class.java)
         assertTrue(template.items.isEmpty())
         assertEquals(TaskState.INVALID, JsonFiles.read(Path.of(invalid.packetPath), ReviewPacket::class.java).tasks.single().state)

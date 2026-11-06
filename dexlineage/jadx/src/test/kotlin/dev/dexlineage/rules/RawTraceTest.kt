@@ -1,7 +1,8 @@
 package dev.dexlineage.rules
 
 import dev.dexlineage.rules.facts.*
-import dev.dexlineage.rules.facts.DexFactSession.*
+import dev.dexlineage.rules.facts.ApkFacts.*
+import dev.dexlineage.rules.facts.DexMethod
 import jadx.api.plugins.input.data.ICodeReader
 import jadx.api.plugins.input.data.IFieldRef
 import jadx.api.plugins.input.data.IMethodRef
@@ -86,7 +87,7 @@ class RawTraceTest {
         assertEquals(Value.Unknown, trace.calls.last().arrays.getValue(array).getValue(0))
     }
 
-    private fun method(insns: List<InsnData>, args: List<String> = emptyList(), flags: Int = 8, registers: Int = 8): Method {
+    private fun method(insns: List<InsnData>, args: List<String> = emptyList(), flags: Int = 8, registers: Int = 8): DexMethod {
         val reader = proxy<ICodeReader> { name, callArgs -> when(name) {
             "getArgsStartReg" -> -1
             "getRegistersCount" -> registers
@@ -95,7 +96,7 @@ class RawTraceTest {
             "visitInstructions" -> { @Suppress("UNCHECKED_CAST") val consumer = callArgs!![0] as Consumer<InsnData>; insns.forEach(consumer::accept); null }
             else -> null
         } }
-        return Method(MethodId("Lsample;", "run", args, "Ljava/lang/String;"), flags, reader)
+        return DexMethod(MethodId("Lsample;", "run", args, "Ljava/lang/String;"), flags, reader)
     }
     private fun insn(op: Opcode, offset: Int, regs: List<Int> = emptyList(), target: Int = 0, text: String? = null,
         number: Long = 0, field: Field? = null, method: MethodId? = null): InsnData = proxy { name, args -> when(name) {

@@ -13,6 +13,8 @@ import java.nio.file.Path
 import kotlin.test.*
 
 class MigrationServiceTest {
+    private val service = MigrationService()
+
     @TempDir lateinit var temp: Path
     private data class Fixture(val dir: Path, val run: MigrationRun)
 
@@ -59,15 +61,15 @@ class MigrationServiceTest {
         val batch = MigrationReviewBatch(SCHEMA_VERSION, f.run.runId, f.run.knowledge.knowledgeId, f.run.sourceApk.sha256, f.run.targetApk.sha256, items)
         val path = temp.resolve(name)
         JsonFiles.writeNew(path, batch)
-        return MigrationService.submit(f.dir, path)
+        return service.submit(f.dir, path)
     }
 
     @Test fun `matching artifacts are digest bound and remain consumable after moving publication`() {
         val f = fixture(withArtifact = true)
         val original = f.run.methodArtifacts!!.single()
-        MigrationService.readRun(f.dir)
+        service.readRun(f.dir)
         val out = temp.resolve("published-artifacts")
-        MigrationService.publish(f.dir, out)
+        service.publish(f.dir, out)
         val moved = temp.resolve("relocated-publication"); Files.move(out, moved)
         val report = com.google.gson.JsonParser.parseString(Files.readString(moved.resolve("report.json"))).asJsonObject
         val ref = JsonFiles.gson.fromJson(report.getAsJsonArray("methodArtifacts").single(), ScenarioArtifactRef::class.java)
@@ -75,7 +77,7 @@ class MigrationServiceTest {
         assertEquals(original.kind, ref.kind)
         assertEquals(original.sha256, Digests.file(moved.resolve(ref.path)))
         Files.writeString(Path.of(original.path), "changed diagnostics")
-        assertFailsWith<ValidationException> { MigrationService.readRun(f.dir) }
+        assertFailsWith<ValidationException> { service.readRun(f.dir) }
         assertEquals(original.sha256, Digests.file(moved.resolve(ref.path)), "Published package must not depend on the old artifact path")
     }
     @Test fun `review resubmission revision recovery and incremental publish preserve knowledge`() {
@@ -86,7 +88,7 @@ class MigrationServiceTest {
         assertEquals(first.revisions, identical.revisions)
         assertEquals(1, ReviewStore.latest(f.dir, f.run.runId).size)
         val firstOut = temp.resolve("published-1")
-        val firstPublication = MigrationService.publish(f.dir, firstOut)
+        val firstPublication = service.publish(f.dir, firstOut)
         assertEquals(1, firstPublication.accepted)
         assertEquals(2, firstPublication.unresolved)
         val knowledge = KnowledgeFiles.read(firstOut.resolve("knowledge.json"))
@@ -112,19 +114,19 @@ class MigrationServiceTest {
         assertFailsWith<ValidationException> { submit(f, "unversioned-change.json", listOf(changed)) }
         val next = submit(f, "explicit-revision.json", listOf(changed.copy(supersedes = first.revisions.getValue(review.taskId))))
         assertNotEquals(first.revisions, next.revisions)
-        assertEquals(TaskState.ACCEPTED, MigrationService.tasks(f.dir, "ACCEPTED", 0, 1).tasks.single().state)
-        assertEquals(0, MigrationService.tasks(f.dir, "UNREVIEWED").total)
-        assertEquals(0, MigrationService.tasks(f.dir).total)
-        assertEquals(2, MigrationService.tasks(f.dir, "ALL").total)
+        assertEquals(TaskState.ACCEPTED, service.tasks(f.dir, "ACCEPTED", 0, 1).tasks.single().state)
+        assertEquals(0, service.tasks(f.dir, "UNREVIEWED").total)
+        assertEquals(0, service.tasks(f.dir).total)
+        assertEquals(2, service.tasks(f.dir, "ALL").total)
         val nextOut = temp.resolve("published-2")
-        MigrationService.publish(f.dir, nextOut)
+        service.publish(f.dir, nextOut)
         assertEquals(firstPublication.knowledgeId, KnowledgeFiles.read(firstOut.resolve("knowledge.json")).knowledgeId)
         assertNotEquals(knowledge.knowledgeId, KnowledgeFiles.read(nextOut.resolve("knowledge.json")).knowledgeId)
         val replayOut = temp.resolve("replayed-first")
-        val replay = MigrationService.publish(f.dir, replayOut, firstOut.resolve("report.json"))
+        val replay = service.publish(f.dir, replayOut, firstOut.resolve("report.json"))
         assertEquals(firstPublication.knowledgeId, replay.knowledgeId)
         assertEquals(Files.readString(firstOut.resolve("mapping.tiny")), Files.readString(replayOut.resolve("mapping.tiny")))
-        assertFailsWith<ValidationException> { MigrationService.publish(f.dir, nextOut) }
+        assertFailsWith<ValidationException> { service.publish(f.dir, nextOut) }
     }
     @Test fun `batch with one stale supersedes commits no other task`() {
         val f = fixture()
@@ -134,7 +136,7 @@ class MigrationServiceTest {
         val deferred = MigrationFixtures.review(f.run, f.run.tasks[1]).copy(action = ReviewAction.DEFER)
         assertFailsWith<ValidationException> { submit(f, "invalid-batch.json", listOf(deferred, changed)) }
         assertEquals(setOf(original.taskId), ReviewStore.latest(f.dir, f.run.runId).keys)
-        assertEquals(TaskState.INVALID, MigrationService.tasks(f.dir, "INVALID").tasks.single().state)
+        assertEquals(TaskState.INVALID, service.tasks(f.dir, "INVALID").tasks.single().state)
     }
     @Test fun `wrong review run knowledge and APK identities are rejected before persistence`() {
         val f = fixture()
@@ -143,25 +145,25 @@ class MigrationServiceTest {
         batches.forEachIndexed { i, batch ->
             val path = temp.resolve("wrong-$i.json")
             JsonFiles.writeNew(path, batch)
-            assertFailsWith<ValidationException> { MigrationService.submit(f.dir, path) }
+            assertFailsWith<ValidationException> { service.submit(f.dir, path) }
         }
         assertTrue(ReviewStore.latest(f.dir, f.run.runId).isEmpty())
     }
     @Test fun `unchanged disk evidence resumes without loading APKs`() {
         val f = fixture()
-        val records = MigrationService.inspect(f.dir, setOf("item-0"))
+        val records = service.inspect(f.dir, setOf("item-0"))
         assertEquals(setOf(f.run.tasks[0].entry.binding, f.run.tasks[0].candidates.single().ref), records.map { it.ref }.toSet())
-        val replay = MigrationService.inspect(f.dir, setOf("item-0"))
+        val replay = service.inspect(f.dir, setOf("item-0"))
         assertEquals(records, replay)
         Files.writeString(f.dir.resolve(records.first().javaPath), "tampered")
-        assertFailsWith<ValidationException> { MigrationService.inspect(f.dir, setOf("item-0")) }
+        assertFailsWith<ValidationException> { service.inspect(f.dir, setOf("item-0")) }
     }
     @Test fun `packet includes invalid tasks but only drafts unique current results`() {
         val f = fixture()
         val out = temp.resolve("packet")
-        val manifest = ReviewPackets.write(f.dir, emptySet(), out)
+        val manifest = ReviewPackets(service).write(f.dir, emptySet(), out)
         assertEquals(listOf("item-0", "item-1"), manifest.taskIds)
-        assertEquals(manifest, ReviewPackets.validate(out, f.dir))
+        assertEquals(manifest, ReviewPackets(service).validate(out, f.dir))
         val packet = JsonFiles.read(out.resolve("review-packet.json"), MigrationReviewPacket::class.java)
         assertEquals(setOf(TaskState.UNREVIEWED, TaskState.INVALID), packet.tasks.map { it.state }.toSet())
         assertEquals(packet.sharedEvidence.size, packet.sharedEvidence.map { it.evidenceId }.distinct().size)
@@ -176,17 +178,17 @@ class MigrationServiceTest {
         assertTrue(draft["level"].isJsonNull)
         assertTrue(draft["nameStillApplies"].isJsonNull)
         assertFalse(draft.has("name"))
-        assertFailsWith<ValidationException> { MigrationService.submit(f.dir, out.resolve("review-template.json")) }
+        assertFailsWith<ValidationException> { service.submit(f.dir, out.resolve("review-template.json")) }
         assertTrue(ReviewStore.latest(f.dir, f.run.runId).isEmpty())
     }
     @Test fun `packet evidence files cannot be replaced or silently rebound`() {
         val f = fixture()
         val out = temp.resolve("packet")
-        ReviewPackets.write(f.dir, setOf("item-0"), out)
+        ReviewPackets(service).write(f.dir, setOf("item-0"), out)
         val packet = JsonFiles.read(out.resolve("review-packet.json"), MigrationReviewPacket::class.java)
-        assertFailsWith<ValidationException> { ReviewPackets.validate(out, f.dir, setOf("item-1")) }
+        assertFailsWith<ValidationException> { ReviewPackets(service).validate(out, f.dir, setOf("item-1")) }
         Files.writeString(Path.of(packet.sharedEvidence.first().javaFile.path), "replaced code")
-        assertFailsWith<ValidationException> { ReviewPackets.validate(out, f.dir, setOf("item-0")) }
+        assertFailsWith<ValidationException> { ReviewPackets(service).validate(out, f.dir, setOf("item-0")) }
     }
     @Test fun `legacy run omits execution markers and keeps its fingerprint`() {
         val f = fixture()
@@ -194,21 +196,21 @@ class MigrationServiceTest {
         assertFalse(raw.has("dependencyEvaluation"))
         assertFalse(raw.has("resolvedAnchors"))
         assertFalse(raw.has("evaluatedRules"))
-        assertEquals(f.run.runId, MigrationService.readRun(f.dir).fingerprint())
+        assertEquals(f.run.runId, service.readRun(f.dir).fingerprint())
         val changed = f.run.copy(dependencyEvaluation = "unknown")
         Files.writeString(f.dir.resolve("run.json"), JsonFiles.encode(changed.copy(runId = changed.fingerprint())))
-        assertFailsWith<ValidationException> { MigrationService.readRun(f.dir) }
+        assertFailsWith<ValidationException> { service.readRun(f.dir) }
     }
     @Test fun `APK changes cannot be hidden by persisted queue or source knowledge`() {
         val f = fixture()
         Files.writeString(Path.of(f.run.sourceApk.path), "changed APK")
-        assertFailsWith<ValidationException> { MigrationService.tasks(f.dir) }
-        assertFailsWith<ValidationException> { MigrationService.prepare(Path.of(f.run.knowledgeFile.path), Path.of(f.run.sourceApk.path), Path.of(f.run.targetApk.path), temp.resolve("wrong-source")) }
+        assertFailsWith<ValidationException> { service.tasks(f.dir) }
+        assertFailsWith<ValidationException> { service.prepare(Path.of(f.run.knowledgeFile.path), Path.of(f.run.sourceApk.path), Path.of(f.run.targetApk.path), temp.resolve("wrong-source")) }
     }
     @Test fun `snapshot policy is bound into run fingerprint`() {
         val f = fixture()
         Files.writeString(f.dir.resolve("run.json"), JsonFiles.encode(f.run.copy(minConfidence = Confidence.LOW)))
-        assertFailsWith<ValidationException> { MigrationService.readRun(f.dir) }
+        assertFailsWith<ValidationException> { service.readRun(f.dir) }
     }
     @Test fun `old target selection fields are explicitly refused`() {
         val f = fixture()
@@ -217,7 +219,7 @@ class MigrationServiceTest {
         json.getAsJsonArray("items")[0].asJsonObject.addProperty("targetDescriptor", "Lx;")
         val path = temp.resolve("old-selection.json")
         JsonFiles.writeNew(path, json)
-        assertFailsWith<ValidationException> { MigrationService.submit(f.dir, path) }
+        assertFailsWith<ValidationException> { service.submit(f.dir, path) }
         assertTrue(ReviewStore.latest(f.dir, f.run.runId).isEmpty())
     }
     @Test fun `publication stores target rule revision while preserving source knowledge`() {
@@ -225,7 +227,7 @@ class MigrationServiceTest {
         val before = Digests.file(Path.of(f.run.knowledgeFile.path))
         submit(f, "new-rule-review.json", listOf(MigrationFixtures.review(f.run)))
         val out = temp.resolve("new-rules-published")
-        MigrationService.publish(f.dir, out)
+        service.publish(f.dir, out)
         val published = KnowledgeFiles.read(out.resolve("knowledge.json")).entries.single()
         assertEquals("new literal", published.locators.single().anchor)
         assertEquals(mapOf("literal" to "new literal"), published.captures)
@@ -238,16 +240,16 @@ class MigrationServiceTest {
     @Test fun `unknown override properties cannot silently broaden a rule`() {
         val path = temp.resolve("typo-rules.json")
         Files.writeString(path, """{"schemaVersion":3,"items":[{"semanticId":"id","locators":[{"kind":"field-initializer","anchor":"value","factors":[{"kind":"method-signature","returnSameAsField":true,"parameterType":["Ljava/lang/String;"]}]}]}]}""")
-        assertFailsWith<ValidationException> { MigrationService.readRules(path) }
+        assertFailsWith<ValidationException> { service.readRules(path) }
         Files.writeString(path, """{"schemaVersion":3,"items":[{"semanticId":"id","locators":[{"kind":"string-use","anchor":"value"}],"expectedTarget":"La;"}]}""")
-        assertFailsWith<ValidationException> { MigrationService.readRules(path) }
+        assertFailsWith<ValidationException> { service.readRules(path) }
     }
 
     @Test fun `target progress preserves a confirmed entry across inheritance and a failed rule update`() {
         val f = fixture()
         submit(f, "round1-review.json", listOf(MigrationFixtures.review(f.run)))
         val baseDir = temp.resolve("round1-published")
-        MigrationService.publish(f.dir, baseDir)
+        service.publish(f.dir, baseDir)
         val basePath = baseDir.resolve("knowledge.json")
         val base = KnowledgeFiles.read(basePath)
         assertEquals(f.run.knowledge.knowledgeId, base.migrationSourceKnowledgeId)
@@ -256,11 +258,11 @@ class MigrationServiceTest {
             .let { it.copy(runId = it.fingerprint()) }
         val inheritedDir = Files.createDirectory(temp.resolve("round2"))
         JsonFiles.writeNew(inheritedDir.resolve("run.json"), inherited)
-        val inheritedPage = MigrationService.tasks(inheritedDir, "INHERITED")
+        val inheritedPage = service.tasks(inheritedDir, "INHERITED")
         assertEquals(1, inheritedPage.total)
         assertEquals(MigrationExecutionState.INHERITED, inheritedPage.tasks.single().executionState)
         val round2 = temp.resolve("round2-published")
-        MigrationService.publish(inheritedDir, round2)
+        service.publish(inheritedDir, round2)
         assertEquals(base.entries, KnowledgeFiles.read(round2.resolve("knowledge.json")).entries)
         assertEquals(Files.readString(baseDir.resolve("mapping.tiny")), Files.readString(round2.resolve("mapping.tiny")))
 
@@ -274,9 +276,9 @@ class MigrationServiceTest {
             .let { it.copy(runId = it.fingerprint()) }
         val failedDir = Files.createDirectory(temp.resolve("failed-round"))
         JsonFiles.writeNew(failedDir.resolve("run.json"), failed)
-        assertEquals(TaskState.INVALID, MigrationService.tasks(failedDir, "ALL").tasks.first().state)
+        assertEquals(TaskState.INVALID, service.tasks(failedDir, "ALL").tasks.first().state)
         val failedOut = temp.resolve("failed-round-published")
-        MigrationService.publish(failedDir, failedOut)
+        service.publish(failedDir, failedOut)
         val preserved = KnowledgeFiles.read(failedOut.resolve("knowledge.json"))
         assertEquals(base.entries, preserved.entries)
         assertEquals(base.unresolved.map { it.entry }, preserved.unresolved.map { it.entry })
@@ -289,10 +291,10 @@ class MigrationServiceTest {
             unresolved = f.run.knowledge.unresolved + f.run.knowledge.entries.map { UnresolvedKnowledge(it, f.run.knowledge.knowledgeId, "waiting", "run") },
             provenance = "migration:test", migrationSourceKnowledgeId = "other-source")
             .let { it.copy(knowledgeId = KnowledgeFiles.id(it)) }
-        assertFailsWith<ValidationException> { MigrationService.validateTargetBase(f.run.knowledge, f.run.targetApk, base) }
+        assertFailsWith<ValidationException> { service.validateTargetBase(f.run.knowledge, f.run.targetApk, base) }
         val correctSource = base.copy(knowledgeId = "", migrationSourceKnowledgeId = f.run.knowledge.knowledgeId)
             .let { it.copy(knowledgeId = KnowledgeFiles.id(it)) }
-        assertFailsWith<ValidationException> { MigrationService.validateTargetBase(f.run.knowledge, f.run.sourceApk, correctSource) }
-        MigrationService.validateTargetBase(f.run.knowledge, f.run.targetApk, correctSource)
+        assertFailsWith<ValidationException> { service.validateTargetBase(f.run.knowledge, f.run.sourceApk, correctSource) }
+        service.validateTargetBase(f.run.knowledge, f.run.targetApk, correctSource)
     }
 }

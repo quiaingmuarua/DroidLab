@@ -15,14 +15,14 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /** Explicit conversion of validated S1 output; no S1 execution path is retained. */
-object S1Importer {
+class S1Importer(private val engine: ResolutionEngine = ResolutionEngine(), private val json: JsonCodec = JsonCodec()) {
     fun importKnowledge(outputDir: Path, oldRunDir: Path, outDir: Path): VersionKnowledge =
-        importWithExecutor(outputDir, oldRunDir, outDir, ResolutionEngine::execute)
+        importWithExecutor(outputDir, oldRunDir, outDir, engine::execute)
 
     internal fun importWithExecutor(outputDir: Path, oldRunDir: Path, outDir: Path, execute: ResolutionExecutor): VersionKnowledge = checkedInput("S1 import") {
-        val run = JsonFiles.read(oldRunDir.resolve("run.json"), RunSnapshot::class.java, 1)
-        val baseline = JsonFiles.read(outputDir.resolve("baseline.json"), Baseline::class.java, 1)
-        val report = JsonFiles.read(outputDir.resolve("report.json"), MigrationReport::class.java, 1)
+        val run = this.json.read(oldRunDir.resolve("run.json"), RunSnapshot::class.java, 1)
+        val baseline = this.json.read(outputDir.resolve("baseline.json"), Baseline::class.java, 1)
+        val report = this.json.read(outputDir.resolve("report.json"), MigrationReport::class.java, 1)
         requireInput(run.toolVersion == "0.1.0" && run.jadxVersion == "1.5.0" && run.policyVersion == 1, "Unsupported S1 version")
         requireInput(run.runId == run.fingerprint(), "S1 run fingerprint mismatch")
         listOf(run.sourceApk, run.targetApk, run.sourceJadx).forEach(Digests::verify)
@@ -85,7 +85,7 @@ object S1Importer {
         evidenceToCopy.values.forEach { e -> copyEvidence(oldRunDir, outDir, e) }
         val upgraded = LegacyUpgrade.publish(run.targetApk, entries, pending, outDir, outDir, "s1:${run.runId}",
             "s1-import:${run.runId}:${Digests.file(outputDir.resolve("report.json"))}", execute)
-        JsonFiles.writeNew(outDir.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "s1-import-report",
+        this.json.writeNew(outDir.resolve("report.json"), mapOf("schemaVersion" to SCHEMA_VERSION, "kind" to "s1-import-report",
             "sourceRunId" to run.runId, "sourceOutput" to outputDir.toAbsolutePath().normalize().toString(), "knowledgeId" to upgraded.knowledge.knowledgeId,
             "legacyReport" to report, "decisions" to upgraded.decisions,
             "accepted" to upgraded.knowledge.entries.size, "unresolved" to upgraded.knowledge.unresolved.size))
@@ -121,7 +121,7 @@ object S1Importer {
     private fun readEvidence(root: Path, run: RunSnapshot, id: String): EvidenceRecord {
         requireInput(id.matches(Regex("[a-f0-9]{64}")), "Invalid S1 evidence ID")
         val nested = root.resolve("evidence/$id/record.json")
-        val e = JsonFiles.read(if (Files.exists(nested)) nested else root.resolve("evidence/$id.json"), EvidenceRecord::class.java, 1)
+        val e = this.json.read(if (Files.exists(nested)) nested else root.resolve("evidence/$id.json"), EvidenceRecord::class.java, 1)
         requireInput(e.evidenceId == id && e.runId == run.runId && id == Identities.evidenceId(run.runId, e.ref), "S1 evidence identity mismatch")
         requireInput(e.javaPath in listOf("evidence/$id/code.java", "evidence/$id.java"), "Invalid S1 evidence Java path")
         requireInput(Digests.file(root.resolve(e.javaPath)) == e.javaSha256, "S1 evidence Java content changed")

@@ -2,13 +2,13 @@ package dev.dexlineage.rules
 
 import dev.dexlineage.io.*
 import dev.dexlineage.model.*
-import dev.dexlineage.rules.facts.DexFactSession
+import dev.dexlineage.rules.facts.ApkFacts
 import dev.dexlineage.knowledge.RuleProofs
 import java.nio.file.Files
 import java.nio.file.Path
 
 /** A registered compiled matcher has no review or publication authority. */
-internal interface MatchingHandler {
+interface MatchingHandler {
     val id: String
     val resultKind: EntityKind
     val dependencyKinds: Map<String, EntityKind>
@@ -16,16 +16,28 @@ internal interface MatchingHandler {
     fun validate(rule: RuleRevision)
     fun validateProducers(rule: RuleRevision, producers: Map<String, RuleRevision>) = Unit
     fun scanNeeds(rule: RuleRevision): ScanNeeds = ScanNeeds()
-    fun execute(session: DexFactSession, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult
+    fun execute(session: ApkFacts, rule: RuleRevision, dependencies: Map<String, SupportAnchor>): StrategyResult
 }
 
-internal enum class EvidenceMode { EAGER, ON_INSPECT }
-internal data class ScanNeeds(val literals: Set<String> = emptySet())
+enum class EvidenceMode { EAGER, ON_INSPECT }
+data class ScanNeeds(val literals: Set<String> = emptySet())
 
 /** Validation and lookup do not interpret any handler's parameters or producer IDs. */
-internal class HandlerRegistry(definitions: List<MatchingHandler>) {
-    private val handlers = definitions.associateBy { it.id }
-    init { requireInput(this.handlers.size == definitions.size, "Duplicate registered strategy ID") }
+class HandlerRegistry(definitions: List<MatchingHandler>) {
+    private val handlers = definitions.map { implementation ->
+        // Freeze declarations, while execution remains the supplied compiled implementation.
+        object : MatchingHandler by implementation {
+            override val id = implementation.id
+            override val resultKind = implementation.resultKind
+            override val dependencyKinds: Map<String, EntityKind> =
+                java.util.Collections.unmodifiableMap(implementation.dependencyKinds.toMap())
+            override val evidenceMode = implementation.evidenceMode
+        }
+    }.associateBy { it.id }
+    init {
+        requireInput(handlers.keys.all { it.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]*")) }, "Invalid registered strategy ID")
+        requireInput(this.handlers.size == definitions.size, "Duplicate registered strategy ID")
+    }
     fun handler(id: String): MatchingHandler = handlers[id] ?: throw ValidationException("Unknown strategy: $id")
     fun validate(rule: RuleRevision) = checkedInput("matching strategy") {
         RuleProofs.validate(rule)
@@ -45,16 +57,16 @@ internal class HandlerRegistry(definitions: List<MatchingHandler>) {
         handler.validateProducers(rule, producers)
     }
 }
-internal data class StrategyResult(val matches: List<MatchFact>, val unresolvedPaths: List<MatchUncertainty> = emptyList(),
+data class StrategyResult(val matches: List<MatchFact>, val unresolvedPaths: List<MatchUncertainty> = emptyList(),
     val artifacts: List<ProducedArtifact> = emptyList())
 
 /** Concrete payloads retain their Kotlin type; only their deterministic bytes cross the generic writer. */
-internal interface ProducedArtifact {
+interface ProducedArtifact {
     val kind: String
     fun encode(): String
 }
 
-internal data class TypedArtifact<T : Any>(override val kind: String, val value: T) : ProducedArtifact {
+data class TypedArtifact<T : Any>(override val kind: String, val value: T) : ProducedArtifact {
     override fun encode(): String = JsonFiles.encode(value)
 }
 
@@ -72,7 +84,7 @@ internal object MatchingArtifacts {
 }
 
 /** Structural helpers shared by handler-owned validators; no application vocabulary. */
-internal object HandlerInputs {
+object HandlerInputs {
     fun only(rule: RuleRevision, allowed: Set<String>) {
         requireInput(rule.locators.isEmpty() && rule.parameters.keySet().all { it in allowed }, "Unsupported strategy parameters/locators: ${rule.strategyId}")
     }

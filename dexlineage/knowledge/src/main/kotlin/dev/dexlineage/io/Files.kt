@@ -2,6 +2,7 @@ package dev.dexlineage.io
 
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
+import com.google.gson.TypeAdapterFactory
 import dev.dexlineage.model.*
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -17,8 +18,11 @@ catch (e: ValidationException) { throw e }
 catch (e: ExecutionException) { throw e }
 catch (e: Exception) { throw ValidationException("Invalid $description: ${e.message}", e) }
 
-object JsonFiles {
-    val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+/** Immutable serializer for one configured execution; extensions never alter a global Gson. */
+open class JsonCodec(adapters: List<TypeAdapterFactory> = emptyList()) {
+    val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().apply {
+        adapters.toList().forEach(::registerTypeAdapterFactory)
+    }.create()
     fun encode(value: Any): String = gson.toJson(value) + "\n"
     fun writeNew(path: Path, value: Any) { Files.writeString(path, encode(value), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW) }
     fun <T> read(path: Path, type: Class<T>, schemaVersion: Int = SCHEMA_VERSION): T = try {
@@ -29,6 +33,9 @@ object JsonFiles {
         gson.fromJson(json, type) ?: throw ValidationException("Empty JSON: $path")
     } catch (e: ValidationException) { throw e } catch (e: Exception) { throw ValidationException("Invalid ${type.simpleName} in $path: ${e.message}", e) }
 }
+
+/** Built-in wire types need no domain adapter. Kept for pure knowledge/file utilities. */
+object JsonFiles : JsonCodec()
 
 object Digests {
     fun bytes(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }

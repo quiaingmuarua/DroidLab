@@ -48,6 +48,8 @@ internal object MigrationFixtures {
 }
 
 class DecisionPolicyTest {
+    private val service = MigrationService()
+
     @Test fun `unique candidate still requires review and old plus new evidence`() {
         val run = MigrationFixtures.run()
         assertEquals(TaskState.UNREVIEWED, MigrationFixtures.decide(run, emptyList()).single().state)
@@ -138,13 +140,13 @@ class DecisionPolicyTest {
         val run = MigrationFixtures.run()
         val previous = run.tasks.single().entry.ruleRevision!!
         val newLocator = Locator("string-use", "target-only literal")
-        val changed = MigrationService.effectiveRules(run.knowledge, listOf(MigrationRuleOverride("cache", listOf(newLocator), previous.revisionId)))
+        val changed = service.effectiveRules(run.knowledge, listOf(MigrationRuleOverride("cache", listOf(newLocator), previous.revisionId)))
         assertEquals(listOf(newLocator), changed.getValue("cache").locators)
-        assertEquals(previous, MigrationService.effectiveRules(run.knowledge, emptyList()).getValue("cache"))
-        assertFailsWith<ValidationException> { MigrationService.effectiveRules(run.knowledge, listOf(MigrationRuleOverride("new-target", listOf(newLocator)))) }
-        assertFailsWith<ValidationException> { MigrationService.effectiveRules(run.knowledge, listOf(MigrationRuleOverride("cache", listOf(newLocator), "wrong"))) }
+        assertEquals(previous, service.effectiveRules(run.knowledge, emptyList()).getValue("cache"))
+        assertFailsWith<ValidationException> { service.effectiveRules(run.knowledge, listOf(MigrationRuleOverride("new-target", listOf(newLocator)))) }
+        assertFailsWith<ValidationException> { service.effectiveRules(run.knowledge, listOf(MigrationRuleOverride("cache", listOf(newLocator), "wrong"))) }
         val duplicate = MigrationRuleOverride("cache", listOf(newLocator))
-        assertFailsWith<ValidationException> { MigrationService.effectiveRules(run.knowledge, listOf(duplicate, duplicate)) }
+        assertFailsWith<ValidationException> { service.effectiveRules(run.knowledge, listOf(duplicate, duplicate)) }
     }
     @Test fun `target-only rule cannot accept a review bound to the source rule`() {
         val task = MigrationFixtures.task()
