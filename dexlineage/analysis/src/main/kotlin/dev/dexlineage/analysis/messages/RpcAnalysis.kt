@@ -120,7 +120,7 @@ internal object RpcAnalysis {
 /** Messages' finite analysis recipe; orchestration and acceptance remain in Analysis. */
 internal object MessagesGrpcAnalysisMethod : AnalysisMethod {
     override val id = "messages.grpc"
-    override val seedRounds = 3
+    override val requiresSeeds = true
     override fun validate(profile: AnalysisProfile) = RpcAnalysis.validate(profile)
     override fun leads(apk: Artifact, profile: AnalysisProfile, facts: List<MatchFact>) = RpcAnalysis.leads(apk, profile, facts)
     override fun drafts(profile: AnalysisProfile, leads: List<DiscoveryLead>) = RpcAnalysis.drafts(profile, leads)

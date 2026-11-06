@@ -11,7 +11,7 @@ import java.nio.file.Path
 import kotlin.test.*
 
 /** File/proof protocol fixtures; actual APK execution is covered by the CLI integration suite. */
-class AnalysisRoundsTest {
+class AnalysisDependencyProofTest {
     @TempDir lateinit var temp: Path
     private val inventory = mapOf("Llogger;" to "classes.dex", "Ltarget;" to "classes.dex", "Lother;" to "classes.dex")
     private fun artifact(): Artifact = Digests.artifact(temp.resolve("identity.apk").also { if (!Files.exists(it)) Files.writeString(it, "identity only") })
@@ -27,14 +27,15 @@ class AnalysisRoundsTest {
         return RuleProofs.create(apk.sha256, rule, "test-build", listOf(fact(ref(apk, "Llogger;"))))
     }
     private fun saveRun(name: String, apk: Artifact, base: Pair<Path, VersionKnowledge>? = null, root: Resolution? = null,
-                        factory: Resolution? = null, target: Resolution? = null): Pair<Path, AnalysisRun> {
+                        factory: Resolution? = null, target: Resolution? = null, resolved: Map<String, SupportAnchor>? = null): Pair<Path, AnalysisRun> {
         val directory = temp.resolve(name); Files.createDirectories(directory)
         val rules = AnalysisRuleFile(items = listOf(AnalysisRuleItem("component", proposedName = "Component", strategy = targetSpec())), anchors = definitions())
         val rulesPath = temp.resolve("$name-rules.json"); JsonFiles.writeNew(rulesPath, rules)
-        val available = base?.second?.anchors.orEmpty().associateBy { it.key }
+        val inherited = base?.second?.anchors.orEmpty().associateBy { it.key }
+        val available = resolved ?: inherited
         val anchorTasks = rules.anchors.map { definition ->
             val rule = RuleProofs.revision(definition.locators, definition.strategy)
-            val old = available[definition.key]
+            val old = inherited[definition.key]
             val proof = old?.resolution ?: if (definition.key == "logger") root else factory
             AnalysisAnchorTask(definition.key, rule, proof, if (old != null) AnalysisExecutionState.INHERITED else if (proof == null) AnalysisExecutionState.WAITING_DEPENDENCY else AnalysisExecutionState.EXECUTED,
                 if (proof == null) rule.requires.values.filter { it !in available }.sorted() else emptyList())
@@ -45,7 +46,7 @@ class AnalysisRoundsTest {
         var run = AnalysisRun(runId = "", engineBuildId = "test-build", apk = apk, rulesFile = Digests.artifact(rulesPath), rules = rules,
             discoveryFile = null, discovery = null, baseFile = base?.first?.resolve("knowledge.json")?.let(Digests::artifact), baseKnowledge = base?.second,
             classInventory = inventory, tasks = listOf(targetTask), scan = ScanStats(3, 2, 3, 1, 0, emptyList()), analysisDiagnostics = emptyList(), analysisMillis = 0,
-            createdAt = "fixture", anchorTasks = anchorTasks)
+            createdAt = "fixture", anchorTasks = anchorTasks, dependencyEvaluation = resolved?.let { "in-run" }, resolvedAnchors = resolved)
         run = run.copy(runId = run.fingerprint())
         JsonFiles.writeNew(directory.resolve("run.json"), run)
         val refs = listOfNotNull(root, factory, target).flatMap { proof -> proof.candidates.map { it.ref } + proof.matches.flatMap { it.relatedRefs } + KnowledgeFiles.evidenceClosure(proof).map { it.ref } }.distinct()
@@ -53,7 +54,56 @@ class AnalysisRoundsTest {
         return directory to run
     }
 
-    @Test fun `unique anchors publish without review and only the next snapshot enables a dependent round`() {
+    @Test fun `one run carries canonical dependency proofs through review and publication`() {
+        val apk = artifact()
+        val directory = temp.resolve("in-run")
+        fun anchor(key: String, proof: Resolution): SupportAnchor {
+            val owner = proof.uniqueEntity!!.owner
+            val id = Digests.text("fixture-$key-${owner.descriptor}")
+            val relative = "dependency-evidence/$id/code.java"
+            val file = directory.resolve(relative); Files.createDirectories(file.parent)
+            Files.writeString(file, "class logger {}")
+            return SupportAnchor(key, proof.uniqueEntity!!, proof.rule, proof,
+                listOf(KnowledgeEvidence(id, owner, relative, Digests.file(file), null, null, false, emptyList())))
+        }
+        val rootProof = rootProof(apk)
+        val logger = anchor("logger", rootProof)
+        val method = MethodRef(logger.binding.owner, "factory", "(Ljava/lang/String;Ljava/lang/String;)Llogger;")
+        val factoryRule = RuleProofs.revision(emptyList(), factorySpec())
+        val factoryProof = RuleProofs.create(apk.sha256, factoryRule, "test-build", listOf(fact(logger.binding.owner, method)), mapOf("owner" to logger))
+        val factory = anchor("factory", factoryProof)
+        val targetRule = RuleProofs.revision(emptyList(), targetSpec())
+        val targetProof = RuleProofs.create(apk.sha256, targetRule, "test-build", listOf(fact(ref(apk, "Ltarget;"))), mapOf("factory" to factory))
+        val (dir, run) = saveRun("in-run", apk, root = rootProof, factory = factoryProof, target = targetProof,
+            resolved = mapOf("logger" to logger, "factory" to factory))
+        val read = AnalysisService.readRun(dir)
+        assertEquals(run, read)
+        assertTrue(read.tasks.all { it.executionState == AnalysisExecutionState.EXECUTED })
+        val noReview = temp.resolve("without-review")
+        AnalysisService.publish(dir, noReview)
+        val anchorsOnly = KnowledgeFiles.read(noReview.resolve("knowledge.json"))
+        assertTrue(anchorsOnly.entries.isEmpty())
+        assertEquals(listOf(factory, logger), anchorsOnly.anchors)
+        assertEquals(logger, anchorsOnly.anchors.first().resolution.dependencies.getValue("owner"))
+        val evidence = AnalysisService.inspect(dir, setOf("component"))
+        val review = AnalysisReview("component", targetProof.resolutionId, targetRule.revisionId, ReviewAction.ACCEPT,
+            "Component", Confidence.HIGH, "Observed owner and complete factory relation", emptyList(), evidence.map { it.evidenceId })
+        val reviewFile = temp.resolve("current-review.json")
+        JsonFiles.writeNew(reviewFile, AnalysisReviewBatch(runId = run.runId, apkSha256 = apk.sha256, items = listOf(review)))
+        AnalysisService.submit(dir, reviewFile)
+        val output = temp.resolve("accepted")
+        AnalysisService.publish(dir, output)
+        val accepted = KnowledgeFiles.read(output.resolve("knowledge.json"))
+        assertEquals(targetProof, accepted.entries.single().resolution)
+        assertEquals(factory, accepted.entries.single().resolution!!.dependencies.getValue("factory"))
+        val replay = temp.resolve("replay")
+        AnalysisService.publish(dir, replay, output.resolve("report.json"))
+        assertEquals(accepted, KnowledgeFiles.read(replay.resolve("knowledge.json")))
+        Files.writeString(directory.resolve(factory.evidence.single().javaPath), "changed")
+        assertFailsWith<ValidationException> { AnalysisService.readRun(dir) }
+    }
+
+    @Test fun `legacy frozen-base runs retain their interpretation and publication replay`() {
         val apk = artifact()
         val (firstDir, _) = saveRun("round1", apk, root = rootProof(apk))
         val queue = AnalysisService.tasks(firstDir, "WAITING_DEPENDENCY")
@@ -72,7 +122,7 @@ class AnalysisRoundsTest {
         val factoryRule = RuleProofs.revision(emptyList(), factorySpec())
         val factoryProof = RuleProofs.create(apk.sha256, factoryRule, "test-build", listOf(fact(logger.binding.owner, method)), mapOf("owner" to logger))
         val (secondDir, _) = saveRun("round2", apk, firstOut to first, factory = factoryProof)
-        assertNull(AnalysisService.tasks(secondDir, "WAITING_DEPENDENCY").items.single().task.resolution, "This round's new method cannot be consumed immediately")
+        assertNull(AnalysisService.tasks(secondDir, "WAITING_DEPENDENCY").items.single().task.resolution, "Historical runs are read using their original frozen-base semantics")
         val secondOut = temp.resolve("published2"); AnalysisService.publish(secondDir, secondOut)
         val second = KnowledgeFiles.read(secondOut.resolve("knowledge.json"))
         assertEquals(2, second.anchors.size)

@@ -22,7 +22,7 @@ data class ProtoAnalysisCatalog(val schemaVersion: Int = SCHEMA_VERSION, val kin
 /** Fixed target declarations remain work even when discovery cannot establish a child type. */
 internal object MessagesProtoAnalysisMethod : AnalysisMethod {
     override val id = "messages.proto-relations"
-    override val seedRounds = 2
+    override val requiresSeeds = true
 
     internal fun targets(profile: AnalysisProfile): List<ProtoAnalysisTarget> = checkedInput("Proto relation targets") {
         val options = profile.method?.parameters ?: throw ValidationException("Proto analysis requires method settings")

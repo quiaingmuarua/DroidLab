@@ -20,6 +20,9 @@ object ResolutionEngine {
 
     fun buildId(): String = implementationId
 
+    fun openSession(artifact: Artifact, outputRoot: Path): InRunResolutionSession =
+        InRunResolutionSession(artifact, outputRoot, buildId())
+
     fun execute(artifact: Artifact, rules: List<RuleRevision>, workDir: Path): ResolutionBatch = execute(artifact, rules, workDir, emptyMap())
 
     fun execute(artifact: Artifact, rules: List<RuleRevision>, workDir: Path, anchors: Map<String, SupportAnchor>): ResolutionBatch {

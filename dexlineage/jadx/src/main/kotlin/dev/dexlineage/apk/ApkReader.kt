@@ -128,30 +128,48 @@ object ApkReader {
         requireInput(Files.isRegularFile(apk), "Missing APK: $apk")
         descriptors.forEach(Identities::requireDescriptor)
         if (descriptors.isEmpty()) return emptyList()
-        Files.createDirectories(workDir)
-        val args = JadxArgs().apply {
-            inputFiles = emptyList()
-            isSkipResources = true
-            isSkipFilesSave = true
-            outDir = workDir.toAbsolutePath().toFile()
-            threadsCount = 2
-            isDeobfuscationOn = false
-            isUseSourceNameAsClassAlias = false
-            renameFlags = emptySet()
-            // Do not discover GUI, scripting, or user-installed plugins and their caches.
-            pluginLoader = object : JadxPluginLoader {
-                override fun load(): List<JadxPlugin> = listOf(DexInputPlugin())
-                override fun close() = Unit
+        return openEvidenceSession(apk, workDir).use { it.decompile(descriptors) }
+    }
+
+    internal fun openEvidenceSession(apk: Path, workDir: Path): EvidenceSession = EvidenceSession(apk, workDir)
+
+    /** One evidence renderer retained for a single matching execution. */
+    internal class EvidenceSession(private val apk: Path, workDir: Path) : AutoCloseable {
+        private val jadx: JadxDecompiler
+        private val loadErrors: Int
+        private val cache = sortedMapOf<String, DecompiledClass>()
+        init {
+            requireInput(Files.isRegularFile(apk), "Missing APK: $apk")
+            Files.createDirectories(workDir)
+            val args = JadxArgs().apply {
+                inputFiles = emptyList()
+                isSkipResources = true
+                isSkipFilesSave = true
+                outDir = workDir.toAbsolutePath().toFile()
+                threadsCount = 2
+                isDeobfuscationOn = false
+                isUseSourceNameAsClassAlias = false
+                renameFlags = emptySet()
+                // Do not discover GUI, scripting, or user-installed plugins and their caches.
+                pluginLoader = object : JadxPluginLoader {
+                    override fun load(): List<JadxPlugin> = listOf(DexInputPlugin())
+                    override fun close() = Unit
+                }
             }
-        }
-        try {
-            JadxDecompiler(args).use { jadx ->
-                // An empty inputFiles list bypasses resource-table loading in JADX 1.5.0.
-                // skipResources alone does not do so.
+            jadx = JadxDecompiler(args)
+            try {
                 jadx.addCustomCodeLoader(DexInputPlugin().loadFiles(listOf(apk.toAbsolutePath())))
                 jadx.load()
-                val loadErrors = jadx.errorsCount
-                return descriptors.sorted().map { descriptor ->
+                loadErrors = jadx.errorsCount
+            } catch (e: Exception) {
+                jadx.close()
+                throw ExecutionException("Cannot load class evidence from $apk: ${errorText(e)}", e)
+            }
+        }
+        fun decompile(descriptors: Set<String>): List<DecompiledClass> {
+            descriptors.forEach(Identities::requireDescriptor)
+            try {
+                return descriptors.sorted().map { descriptor -> cache.getOrPut(descriptor) {
                     val expectedRaw = Identities.rawName(descriptor)
                     val cls = jadx.searchJavaClassByOrigFullName(expectedRaw)
                         ?: throw ExecutionException("JADX could not resolve original class $descriptor in $apk")
@@ -181,13 +199,14 @@ object ApkReader {
                         throw ExecutionException("No readable Java or Smali for $descriptor: ${diagnostics.joinToString("; ")}")
                     }
                     DecompiledClass(descriptor, java, smali, incomplete, diagnostics.toList(), elapsedMillis(started))
-                }
+                } }
+            } catch (e: ExecutionException) {
+                throw e
+            } catch (e: Exception) {
+                throw ExecutionException("Cannot read class evidence from $apk: ${errorText(e)}", e)
             }
-        } catch (e: ExecutionException) {
-            throw e
-        } catch (e: Exception) {
-            throw ExecutionException("Cannot read class evidence from $apk: ${errorText(e)}", e)
         }
+        override fun close() { jadx.close() }
     }
 
     internal fun codeDiagnostics(code: String, errors: Int, warnings: Int): List<String> = buildList {

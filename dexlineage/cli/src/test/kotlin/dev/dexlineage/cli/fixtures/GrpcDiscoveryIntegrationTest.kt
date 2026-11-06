@@ -219,33 +219,26 @@ class GrpcDiscoveryIntegrationTest {
             AnalysisAnchorDefinition("$key.full-name", strategy = StrategySpec("grpc-java.full-method-name",
                 resultKind = EntityKind.METHOD, requires = mapOf("descriptor" to "$key.descriptor")))) }
         val rules = cli.write("inputs/$version-anchors.json", AnalysisRuleFile(anchors = anchors))
-        var base: Path? = null
-        for (round in 1..3) {
-            val dir = cli.output.resolve("$version-anchor-run-$round")
-            val args = mutableListOf<Any>("analysis", "prepare", "--apk", apk(version), "--rules", rules, "--run", dir)
-            base?.let { args.addAll(listOf("--base-knowledge", knowledge(it))) }
-            cli.execute("$version-anchor-$round", *args.toTypedArray())
-            val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
-            if (round == 3) {
-                val unique = run.anchorTasks.single { it.key == "rpc.full-name" }.resolution!!
-                assertEquals(ResolutionStatus.UNIQUE, unique.status)
-                assertMethod(unique.uniqueMethod!!, version, "ThemeDescriptor", "name", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;")
-                val multiple = run.anchorTasks.single { it.key == "ambiguous.full-name" }.resolution!!
-                assertEquals(ResolutionStatus.AMBIGUOUS, multiple.status)
-                val expected = listOf("name", "alternate").map { oracle.getValue(version).method(namespace + "AmbiguousDescriptor", it,
-                    "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") }.toSet()
-                assertEquals(expected.map { it.owner }.toSet(), setOf(raw(version, "AmbiguousDescriptor")))
-                assertEquals(expected.map { it.name + it.descriptor }.toSet(), multiple.candidates.map { it.method!!.name + it.method!!.descriptor }.toSet())
-            }
-            val out = cli.output.resolve("$version-anchor-published-$round")
-            cli.execute("$version-anchor-publish-$round", "analysis", "publish", "--run", dir, "--out", out)
-            val packageValue = cli.read<VersionKnowledge>(knowledge(out))
-            assertTrue(packageValue.entries.isEmpty())
-            assertEquals(if (round == 1) 2 else if (round == 2) 4 else 5, packageValue.anchors.size)
-            PublishedFixtureAssertions.verify(cli, apk(version), knowledge(out), oracle.getValue(version), emptyMap(), anchorTruth(version))
-            base = out
-        }
-        return base!!
+        val dir = cli.output.resolve("$version-anchor-run")
+        cli.execute("$version-anchors", "analysis", "prepare", "--apk", apk(version), "--rules", rules, "--run", dir)
+        val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
+        assertEquals("in-run", run.dependencyEvaluation)
+        val unique = run.anchorTasks.single { it.key == "rpc.full-name" }.resolution!!
+        assertEquals(ResolutionStatus.UNIQUE, unique.status)
+        assertMethod(unique.uniqueMethod!!, version, "ThemeDescriptor", "name", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;")
+        val multiple = run.anchorTasks.single { it.key == "ambiguous.full-name" }.resolution!!
+        assertEquals(ResolutionStatus.AMBIGUOUS, multiple.status)
+        val expected = listOf("name", "alternate").map { oracle.getValue(version).method(namespace + "AmbiguousDescriptor", it,
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") }.toSet()
+        assertEquals(expected.map { it.owner }.toSet(), setOf(raw(version, "AmbiguousDescriptor")))
+        assertEquals(expected.map { it.name + it.descriptor }.toSet(), multiple.candidates.map { it.method!!.name + it.method!!.descriptor }.toSet())
+        val out = cli.output.resolve("$version-anchor-published")
+        cli.execute("$version-anchor-export", "analysis", "publish", "--run", dir, "--out", out)
+        val packageValue = cli.read<VersionKnowledge>(knowledge(out))
+        assertTrue(packageValue.entries.isEmpty())
+        assertEquals(5, packageValue.anchors.size)
+        PublishedFixtureAssertions.verify(cli, apk(version), knowledge(out), oracle.getValue(version), emptyMap(), anchorTruth(version))
+        return out
     }
 
     private fun canonicalReferences(): Map<String, Path> {

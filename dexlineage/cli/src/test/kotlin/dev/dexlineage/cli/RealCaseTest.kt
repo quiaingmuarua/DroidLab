@@ -21,9 +21,8 @@ class RealCaseTest {
     @Test fun `fresh matching unique-only migration and continued analysis preserve knowledge`() {
         val config = Path.of(requireNotNull(System.getProperty("dexlineage.caseProperties")))
         val properties = Properties().apply { Files.newBufferedReader(config).use(::load) }
-        if (properties.getProperty("scenario") == "analysis-workspace") {
-            AnalysisWorkspaceAcceptance.run(config)
-            return
+        require(properties.getProperty("scenario") != "analysis-workspace") {
+            "Workspace recovery acceptance is retired. Use analysis run, explicit submit/publish and current run acceptance."
         }
         if (properties.getProperty("scenario") == "grpc-analysis") {
             GrpcTopicAcceptance.run(config)

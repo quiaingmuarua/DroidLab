@@ -23,12 +23,12 @@ class AnalysisMethodsTest {
         JsonFiles.writeNew(temp.resolve("profile.json"), profile)
         JsonFiles.writeNew(temp.resolve("config.json"), mapOf("schemaVersion" to 4, "apk" to "example.apk", "profile" to "profile.json"))
         val plan = AnalysisMethods.prepareConfig("profile", temp.resolve("config.json"))
-        assertTrue(plan.seedSteps.isEmpty())
+        assertNull(plan.seedRules)
         assertEquals(profile, plan.profile)
         assertEquals(Digests.artifact(temp.resolve("profile.json")), plan.profileFile)
     }
 
-    @Test fun `messages method owns its finite three seed rounds and never accepts class targets as seeds`() {
+    @Test fun `messages method declares seed definitions once and never accepts class targets as seeds`() {
         val profile = AnalysisProfile(id = "topic", strategy = StrategySpec("grpc-java.rpc-discovery", requires = mapOf("nameFactory" to "factory")),
             method = AnalysisMethodSpec("messages.grpc", JsonObject().apply { add("reviewServices", JsonFiles.gson.toJsonTree(listOf("example.Group"))) }))
         JsonFiles.writeNew(temp.resolve("profile.json"), profile)
@@ -36,7 +36,7 @@ class AnalysisMethodsTest {
         JsonFiles.writeNew(temp.resolve("seeds.json"), rules)
         JsonFiles.writeNew(temp.resolve("config.json"), mapOf("schemaVersion" to 4, "apk" to "example.apk", "profile" to "profile.json", "seedRules" to "seeds.json"))
         val plan = AnalysisMethods.prepareConfig("messages.grpc", temp.resolve("config.json"))
-        assertEquals(listOf(rules, rules, rules), plan.seedSteps)
+        assertEquals(rules, plan.seedRules)
         Files.writeString(temp.resolve("seeds.json"), JsonFiles.encode(AnalysisRuleFile(items = listOf(AnalysisRuleItem("rename", locators = listOf(Locator("string-use", "anchor")))))))
         assertFailsWith<ValidationException> { AnalysisMethods.prepareConfig("messages.grpc", temp.resolve("config.json")) }
     }
@@ -51,7 +51,7 @@ class AnalysisMethodsTest {
         val canonical = profile.copy(compatibility = null)
         assertFalse(JsonFiles.encode(canonical).contains("rpcDrafts"))
         assertTrue(JsonFiles.encode(canonical).contains("\"methodId\": \"messages.grpc\""))
-        assertEquals(3, AnalysisMethods.forProfile(canonical).seedRounds)
+        assertTrue(AnalysisMethods.forProfile(canonical).requiresSeeds)
         val bare = source.asJsonObject.deepCopy().also { it.remove("rpcDrafts") }
         val decodedBare = JsonFiles.gson.fromJson(bare, AnalysisProfile::class.java)
         assertEquals("messages.grpc", AnalysisMethods.forProfile(decodedBare).id)

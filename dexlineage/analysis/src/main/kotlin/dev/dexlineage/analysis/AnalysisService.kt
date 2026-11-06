@@ -6,6 +6,7 @@ import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.*
 import dev.dexlineage.mapping.MappingOutput
 import dev.dexlineage.model.*
+import dev.dexlineage.rules.InRunResolutionSession
 import dev.dexlineage.rules.ResolutionEngine
 import dev.dexlineage.rules.RuleEngine
 import dev.dexlineage.rules.RuleJson
@@ -17,19 +18,27 @@ import java.time.Instant
 object AnalysisService {
     fun importJadx(apkPath: Path, projectPath: Path, outDir: Path): ManualCorpus = ManualCorpusFiles.importJadx(apkPath, projectPath, outDir)
 
-    fun discover(apkPath: Path, profilePath: Path, outDir: Path, baseKnowledgePath: Path? = null): AnalysisDiscoveryResult {
+    fun discover(apkPath: Path, profilePath: Path, outDir: Path, baseKnowledgePath: Path? = null): AnalysisDiscoveryResult =
+        discoverWithSession(apkPath, profilePath, outDir, baseKnowledgePath, null, null, null, null)
+
+    internal fun discoverWithSession(apkPath: Path, profilePath: Path, outDir: Path, baseKnowledgePath: Path?,
+                                     session: InRunResolutionSession?, symbols: Map<String, SupportAnchor>?,
+                                     sourceRoots: List<Path>?, profileOverride: AnalysisProfile?): AnalysisDiscoveryResult {
         val apk = Digests.artifact(apkPath)
         val profileSource = Digests.artifact(profilePath)
-        val profile = readProfile(profilePath).copy(compatibility = null)
+        val profile = profileOverride ?: readProfile(profilePath).copy(compatibility = null)
         val baseFile = baseKnowledgePath?.let(Digests::artifact)
         val base = baseKnowledgePath?.let(KnowledgeFiles::read)
         requireInput(base == null || base.artifact.sha256 == apk.sha256, "Discovery base belongs to another APK")
         createNewDirectory(outDir)
         try {
             val rule = RuleProofs.revision(if (profile.strategy == null) listOf(profile.discovery) else emptyList(), profile.strategy)
-            val available = usableAnchors(base, base?.anchors.orEmpty().associate { it.key to it.rule }, ResolutionEngine.buildId())
-            requireInput(rule.requires.values.all { it in available }, "Discovery dependencies are not resolved in its base knowledge")
-            val query = StrategyRegistry.discover(apk, rule, outDir.resolve("work"), available)
+            val available = symbols ?: usableAnchors(base, base?.anchors.orEmpty().associate { it.key to it.rule }, ResolutionEngine.buildId())
+            val waiting = rule.requires.values.filter { it !in available }.distinct().sorted()
+            requireInput(session != null || waiting.isEmpty(), "Discovery dependencies are not resolved in its base knowledge")
+            val query = if (waiting.isNotEmpty()) QueryResult(emptyList(), session!!.execute(emptyList(), emptyMap(), available).scan, null)
+                        else session?.discover(rule, available) ?: StrategyRegistry.discover(apk, rule, outDir.resolve("work"), available)
+            if (symbols != null) symbols.values.forEach { DependencyEvidence.copy(it, sourceRoots.orEmpty(), outDir) }
             complete(query.scan)
             val leads = createLeads(apk, profile, query.matches)
             var discovery = AnalysisDiscovery(discoveryId = "", engineBuildId = ResolutionEngine.buildId(), apk = apk, profileSource = profileSource, profile = profile,
@@ -38,7 +47,8 @@ object AnalysisService {
                 conditionCounts = MatchStatus.entries.associate { state -> state.name to query.matches.sumOf { match -> match.factors.count { it.status == state } } },
                 analysisDiagnostics = query.analysis?.diagnostics.orEmpty().sorted(), analysisMillis = query.analysis?.elapsedMillis ?: 0,
                 createdAt = Instant.now().toString(), baseFile = baseFile, baseKnowledge = base,
-                methodArtifacts = AnalysisMethods.copyArtifacts(query.artifacts, outDir), unresolvedPaths = query.unresolvedPaths.map { it.toWire() }.takeIf { it.isNotEmpty() })
+                methodArtifacts = AnalysisMethods.copyArtifacts(query.artifacts, outDir), unresolvedPaths = query.unresolvedPaths.map { it.toWire() }.takeIf { it.isNotEmpty() },
+                resolvedAnchors = symbols, waitingFor = waiting.takeIf { it.isNotEmpty() })
             discovery = discovery.copy(discoveryId = discovery.fingerprint())
             val code = query.analysis?.code.orEmpty().distinctBy { it.descriptor }
             val evidence = if (code.isEmpty()) emptyList() else EvidenceFiles.publish(outDir, discovery.discoveryId, apk,
@@ -46,7 +56,7 @@ object AnalysisService {
             listOfNotNull(apk, profileSource, baseFile).forEach(Digests::verify)
             val discoveryPath = outDir.resolve("discovery.json")
             JsonFiles.writeNew(discoveryPath, discovery)
-            val artifacts = AnalysisMethods.forProfile(profile).discoveryArtifacts(discovery, outDir)
+            val artifacts = if (waiting.isEmpty()) AnalysisMethods.forProfile(profile).discoveryArtifacts(discovery, outDir) else emptyList()
             val items = AnalysisMethods.forProfile(profile).drafts(profile, leads)
             val rulesPath = if (items.isEmpty()) null else outDir.resolve("rules.json").also {
                 JsonFiles.writeNew(it, AnalysisRuleFile(discovery = Digests.artifact(discoveryPath), minConfidence = profile.minConfidence, items = items))
@@ -82,7 +92,7 @@ object AnalysisService {
         requireInput(rules.kind == "analysis-rules", "Expected analysis-rules document")
         val level: Confidence? = rules.minConfidence
         requireInput(level != null, "Invalid confidence threshold")
-        requireInput(rules.items.isNotEmpty() || rules.anchors.isNotEmpty(), "Analysis rules contain no targets or anchors")
+        requireInput(rules.items.isNotEmpty() || rules.anchors.isNotEmpty() || rules.discovery != null, "Analysis rules contain no targets or anchors")
         requireInput(rules.items.map { it.key }.distinct().size == rules.items.size, "Duplicate Analysis task keys")
         requireInput(rules.anchors.map { it.key }.distinct().size == rules.anchors.size, "Duplicate anchor keys")
         requireInput(rules.items.mapNotNull { it.corpusTargetId }.distinct().size == rules.items.count { it.corpusTargetId != null }, "Duplicate corpus targets")
@@ -109,7 +119,11 @@ object AnalysisService {
     }
 
     fun prepare(apkPath: Path, rulesPath: Path, runDir: Path, baseKnowledgePath: Path? = null, corpusPath: Path? = null,
-                referenceKnowledgePaths: List<Path> = emptyList()): AnalysisRun {
+                referenceKnowledgePaths: List<Path> = emptyList()): AnalysisRun =
+        prepareWithSession(apkPath, rulesPath, runDir, baseKnowledgePath, corpusPath, referenceKnowledgePaths, null)
+
+    internal fun prepareWithSession(apkPath: Path, rulesPath: Path, runDir: Path, baseKnowledgePath: Path?, corpusPath: Path?,
+                                    referenceKnowledgePaths: List<Path>, session: InRunResolutionSession?): AnalysisRun {
         val apk = Digests.artifact(apkPath)
         val rulesFile = Digests.artifact(rulesPath)
         val rules = readRules(rulesPath)
@@ -138,10 +152,12 @@ object AnalysisService {
         validateDependencies(anchorRules, revisions.values.toList(), base?.anchors.orEmpty())
         val available = usableAnchors(base, anchorRules, buildId)
         val inherited = rules.items.mapNotNull { item -> inheritedEntry(item, revisions.getValue(item.key), discovery, corpus, base, available, buildId)?.let { item.key to it } }.toMap()
-        createNewDirectory(runDir)
+        if (session == null) createNewDirectory(runDir)
+        else requireInput(Files.isDirectory(runDir) && !Files.exists(runDir.resolve("run.json")), "Analysis output already has a completed run")
         try {
-            val executing = revisions.filterKeys { it !in inherited }.values + anchorRules.filterKeys { it !in available }.values
-            val batch = ResolutionEngine.execute(apk, executing.toList(), runDir.resolve("work"), available)
+            val executing = revisions.filterKeys { it !in inherited }.values.toList()
+            val batch = if (session == null) ResolutionEngine.openSession(apk, runDir).use { it.execute(executing, anchorRules, available) }
+                        else session.execute(executing, anchorRules, available)
             complete(batch.scan)
             base?.entries?.forEach { entry -> requireInput(batch.scan.classes[entry.binding.descriptor] == entry.binding.dexEntry, "Base class is absent from current APK") }
             available.values.forEach { anchor -> requireInput(batch.scan.classes[anchor.binding.owner.descriptor] == anchor.binding.owner.dexEntry, "Base anchor class is absent from current APK") }
@@ -160,7 +176,8 @@ object AnalysisService {
                 discoveryFile = discoveryFile, discovery = discovery, baseFile = baseFile, baseKnowledge = base,
                 classInventory = batch.scan.classes.toSortedMap(), tasks = tasks, scan = batch.scan.stats,
                 analysisDiagnostics = batch.analysis?.diagnostics.orEmpty(), analysisMillis = batch.analysis?.elapsedMillis ?: 0, createdAt = Instant.now().toString(),
-                anchorTasks = anchorTasks, corpusFile = corpusFile, corpus = corpus, identityReferences = references, methodArtifacts = AnalysisMethods.copyArtifacts(batch.artifacts, runDir))
+                anchorTasks = anchorTasks, corpusFile = corpusFile, corpus = corpus, identityReferences = references, methodArtifacts = AnalysisMethods.copyArtifacts(batch.artifacts, runDir),
+                dependencyEvaluation = "in-run", resolvedAnchors = batch.resolvedAnchors, evaluatedRules = batch.evaluatedRules)
             run = run.copy(runId = run.fingerprint())
             batch.analysis?.code?.takeIf { it.isNotEmpty() }?.let { code ->
                 EvidenceFiles.publish(runDir, run.runId, apk, code.map { ClassRef(apk.sha256, it.descriptor, run.classInventory.getValue(it.descriptor)) }, code)
@@ -232,12 +249,30 @@ object AnalysisService {
             item.corpusTargetId?.let { key -> requireInput(run.corpus?.targets?.any { it.targetId == key } == true, "Unknown corpus target") }
         }
         val catalog = anchorRules(run.rules, run.baseKnowledge)
-        val available = usableAnchors(run.baseKnowledge, catalog, run.engineBuildId)
+        val inheritedAnchors = usableAnchors(run.baseKnowledge, catalog, run.engineBuildId)
+        requireInput(run.dependencyEvaluation == null || run.dependencyEvaluation == "in-run", "Unknown Analysis dependency execution")
+        val available = if (run.dependencyEvaluation == "in-run") {
+            val current = run.resolvedAnchors ?: throw ValidationException("Missing in-run symbol results")
+            val unique = run.anchorTasks.filter { it.resolution?.status == ResolutionStatus.UNIQUE }.associateBy { it.key }
+            requireInput(current.keys == unique.keys, "Resolved symbols differ from unique anchor tasks")
+            val roots = listOfNotNull(dir, run.baseFile?.let { Path.of(it.path).parent })
+            current.forEach { (key, anchor) ->
+                requireInput(anchor.key == key && anchor.rule == catalog[key] && anchor.resolution == unique.getValue(key).resolution,
+                    "Resolved anchor differs from its rule or task proof")
+                KnowledgeFiles.validateAnchor(anchor, run.apk.sha256)
+                requireInput(anchor.resolution.engineBuildId == run.engineBuildId, "Resolved anchor uses another implementation")
+                DependencyEvidence.verify(anchor, roots)
+            }
+            current
+        } else {
+            requireInput(run.resolvedAnchors == null && run.evaluatedRules == null, "Legacy run cannot supply in-run execution results")
+            inheritedAnchors
+        }
         validateDependencies(catalog, run.tasks.map { it.rule }, run.baseKnowledge?.anchors.orEmpty())
         requireInput(run.anchorTasks.map { it.key }.toSet() == catalog.keys && run.anchorTasks.size == catalog.size, "Anchor task set differs from definitions")
         run.anchorTasks.forEach { task ->
             requireInput(task.rule == catalog.getValue(task.key), "Anchor rule differs from definition")
-            val inherited = available[task.key]
+            val inherited = inheritedAnchors[task.key]
             val missing = task.rule.requires.values.filter { it !in available }.distinct().sorted()
             if (inherited != null) requireInput(task.executionState == AnalysisExecutionState.INHERITED && task.resolution == inherited.resolution && task.waitingFor.isEmpty(), "Inherited anchor differs from base proof")
             else if (missing.isNotEmpty()) requireInput(task.executionState == AnalysisExecutionState.WAITING_DEPENDENCY && task.resolution == null && task.waitingFor == missing, "Invalid waiting anchor")
@@ -363,13 +398,21 @@ object AnalysisService {
         }
         run.anchorTasks.filter { it.resolution?.status == ResolutionStatus.UNIQUE && it.executionState != AnalysisExecutionState.INHERITED }.forEach { task ->
             val proof = task.resolution!!
-            val evidence = anchorRefs(run, proof).sortedBy { it.descriptor }.map { ref -> EvidenceFiles.export(dir, run.runId, Identities.evidenceId(run.runId, ref), out) }
-            anchors[task.key] = SupportAnchor(task.key, proof.uniqueEntity!!, task.rule, proof, evidence)
+            if (run.dependencyEvaluation == "in-run") {
+                val anchor = run.resolvedAnchors!!.getValue(task.key)
+                DependencyEvidence.copy(anchor, listOfNotNull(dir, run.baseFile?.let { Path.of(it.path).parent }), out)
+                anchors[task.key] = anchor
+            } else {
+                val evidence = anchorRefs(run, proof).sortedBy { it.descriptor }.map { ref -> EvidenceFiles.export(dir, run.runId, Identities.evidenceId(run.runId, ref), out) }
+                anchors[task.key] = SupportAnchor(task.key, proof.uniqueEntity!!, task.rule, proof, evidence)
+            }
         }
         accepted.forEach { decision ->
             val task = run.tasks.single { it.taskId == decision.taskId }
             val review = decision.review!!
             val evidence = review.evidenceIds.sorted().map { EvidenceFiles.export(dir, run.runId, it, out) }
+            if (run.dependencyEvaluation == "in-run")
+                DependencyEvidence.copy(task.resolution!!, listOfNotNull(dir, run.baseFile?.let { Path.of(it.path).parent }), out)
             entries[decision.semanticId!!] = KnowledgeEntry(decision.semanticId, decision.name!!, decision.target!!,
                 RuleProofs.captures(task.resolution!!), task.rule.locators, evidence, review.rationale,
                 "analysis:${run.runId}:${latest.getValue(task.taskId).revisionId}", task.rule, task.resolution)
@@ -379,7 +422,7 @@ object AnalysisService {
             entries = entries.values.toList(), unresolved = pending.values.toList(), provenance = "analysis:${run.runId}", parentKnowledgeId = run.baseKnowledge?.knowledgeId,
             anchors = anchors.values.toList(), migrationSourceKnowledgeId = run.baseKnowledge?.migrationSourceKnowledgeId))
         MappingOutput.write(out.resolve("mapping.tiny"), knowledge.entries.map { AcceptedRename(it.binding.descriptor, Identities.renamedFullName(it.binding.descriptor, it.name)) })
-        val methodArtifacts = AnalysisMethods.forRun(run).publicationArtifacts(run, decisions, out)
+        val methodArtifacts = if (run.discovery?.waitingFor.orEmpty().isEmpty()) AnalysisMethods.forRun(run).publicationArtifacts(run, decisions, out) else emptyList()
         val packageRoot = out.toAbsolutePath().normalize()
         val portableArtifacts = methodArtifacts.map { ref ->
             val path = Path.of(ref.path).toAbsolutePath().normalize()
@@ -393,6 +436,7 @@ object AnalysisService {
             "counts" to counts(decisions), "acceptedUpdates" to accepted.size, "confirmed" to knowledge.entries.size,
             "resolutionCounts" to ResolutionStatus.entries.associateWith { status -> run.tasks.count { it.resolution?.status == status } },
             "executionCounts" to run.tasks.groupingBy { it.executionState }.eachCount(), "anchorTasks" to run.anchorTasks,
+            "dependencyEvaluation" to run.dependencyEvaluation, "evaluatedRules" to run.evaluatedRules,
             "corpusId" to run.corpus?.corpusId, "corpusTargets" to run.corpus?.let { corpusViews(it, run, decisions) },
             "carriedConfirmed" to (knowledge.entries.size - accepted.size), "unresolved" to knowledge.unresolved.size,
             "identityReferences" to run.identityReferences?.map { reference -> mapOf("knowledgeId" to reference.knowledge.knowledgeId,
@@ -401,6 +445,7 @@ object AnalysisService {
                     .map { decision -> mapOf("semanticId" to decision.semanticId, "name" to decision.name, "binding" to decision.target) }) },
             "methodArtifacts" to portableArtifacts,
             "scan" to run.scan, "analysisMillis" to run.analysisMillis, "analysisDiagnostics" to run.analysisDiagnostics,
+            "discoveryWaitingFor" to run.discovery?.waitingFor,
             "evidenceMetrics" to mapOf("scope" to "emitted_or_cached_evidence", "agentReadsMeasured" to false,
                 "ownerApkPairs" to cached.map { it.ref }.distinct().size, "javaLines" to cached.sumOf { e -> Files.lines(dir.resolve(e.javaPath)).use { it.count() } },
                 "smaliLines" to cached.sumOf { e -> e.smaliPath?.let { path -> Files.lines(dir.resolve(path)).use { it.count() } } ?: 0L }, "incompleteClasses" to cached.count { it.incomplete })))
@@ -426,6 +471,18 @@ object AnalysisService {
         requireInput(discovery.leads == createLeads(apk, discovery.profile, discovery.matches), "Discovery leads differ from frozen facts")
         requireInput((discovery.baseFile == null) == (discovery.baseKnowledge == null), "Incomplete discovery dependency base")
         discovery.baseKnowledge?.let { requireInput(it.artifact.sha256 == apk.sha256 && it.knowledgeId == KnowledgeFiles.id(it), "Discovery dependencies belong to another APK") }
+        discovery.resolvedAnchors?.let { anchors ->
+            val rule = RuleProofs.revision(if (discovery.profile.strategy == null) listOf(discovery.profile.discovery) else emptyList(), discovery.profile.strategy)
+            anchors.forEach { (key, anchor) ->
+                requireInput(key == anchor.key && anchor.resolution.engineBuildId == discovery.engineBuildId, "Discovery dependency identity mismatch")
+                KnowledgeFiles.validateAnchor(anchor, apk.sha256)
+                DependencyEvidence.verify(anchor, listOf(path.toAbsolutePath().parent))
+            }
+            val missing = rule.requires.values.filter { it !in anchors }.distinct().sorted()
+            requireInput(discovery.waitingFor.orEmpty() == missing, "Discovery waiting dependencies differ from resolved symbols")
+            requireInput(missing.isEmpty() || discovery.matches.isEmpty() && discovery.leads.isEmpty(), "Blocked discovery cannot contain matching facts")
+        }
+        requireInput(discovery.waitingFor == null || discovery.resolvedAnchors != null, "Blocked discovery lacks symbol results")
         discovery.baseFile?.let { file ->
             Digests.verify(file)
             requireInput(KnowledgeFiles.read(Path.of(file.path)) == discovery.baseKnowledge, "Discovery dependency base changed")

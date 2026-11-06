@@ -72,91 +72,80 @@ class RpcRelatedIntegrationTest {
             corpusTargetId = descriptorTarget.targetId.takeIf { role == "descriptor" }) }
         val rules = cli.write("inputs/related.json", AnalysisRuleFile(items = items,
             anchors = listOf(AnalysisAnchorDefinition("rpc", strategy = rpc("fixture.related.Group")))))
-        var sourceBase: Path? = null
-        for (round in 1..2) {
-            val dir = cli.output.resolve("source-run-$round")
-            val args = mutableListOf<Any>("analysis", "prepare", "--apk", apk("v1"), "--rules", rules, "--corpus", corpusPath, "--run", dir)
-            sourceBase?.let { args.addAll(listOf("--base-knowledge", it.resolve("knowledge.json"))) }
-            cli.execute("source-$round-prepare", *args.toTypedArray())
+        val sourceDir = cli.output.resolve("source-run")
+        cli.execute("source-prepare", "analysis", "prepare", "--apk", apk("v1"), "--rules", rules,
+            "--corpus", corpusPath, "--run", sourceDir)
+        run {
+            val dir = sourceDir
             val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
+            assertEquals("in-run", run.dependencyEvaluation)
             assertRpc(run.anchorTasks.single().resolution!!, "v1", "getGroupInfo", "()${sourceType("RelatedDescriptor")}")
-            if (round == 1) {
-                assertTrue(run.tasks.all { it.resolution == null && it.executionState == AnalysisExecutionState.WAITING_DEPENDENCY })
-            } else {
-                val reviews = run.tasks.map { task ->
-                    assertRole(task.resolution!!, "v1", task.taskId)
-                    val evidence = inspect("analysis", dir, task.taskId)
-                    AnalysisReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT,
-                        roleNames.getValue(task.taskId), Confidence.HIGH,
-                        "Self-authored fixture defines this ${task.taskId} role in one RPC construction, independently checked with R8 source identity.",
-                        listOf("Static protocol regression; this fixture review does not evaluate Agent semantic judgment or runtime RPC behavior."),
-                        evidence.map { it.evidenceId })
-                }
-                val descriptor = run.tasks.single { it.taskId == "descriptor" }
-                val researchEvidence = research.targets.single { it.target.targetId == descriptorTarget.targetId }.evidence
-                assertEquals(descriptor.resolution!!.uniqueRef, researchEvidence.ref, "Same entity; only the research evidence namespace differs")
-                assertNotEquals(run.runId, researchEvidence.runId)
-                val invalid = reviews.single { it.taskId == "descriptor" }.copy(evidenceIds = listOf(researchEvidence.evidenceId))
-                val invalidFile = cli.write("reviews/research-is-not-review-evidence.json", AnalysisReviewBatch(runId = run.runId,
-                    apkSha256 = run.apk.sha256, items = listOf(invalid)))
-                cli.execute("research-evidence-rejected", "analysis", "submit", "--run", dir, "--review", invalidFile, expectedExit = 2)
-                val reviewFile = cli.write("reviews/source.json", AnalysisReviewBatch(runId = run.runId, apkSha256 = run.apk.sha256, items = reviews))
-                cli.execute("source-submit", "analysis", "submit", "--run", dir, "--review", reviewFile)
+            val reviews = run.tasks.map { task ->
+                assertRole(task.resolution!!, "v1", task.taskId)
+                val evidence = inspect("analysis", dir, task.taskId)
+                AnalysisReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT,
+                    roleNames.getValue(task.taskId), Confidence.HIGH,
+                    "Self-authored fixture defines this ${task.taskId} role in one RPC construction, independently checked with R8 source identity.",
+                    listOf("Static protocol regression; this fixture review does not evaluate Agent semantic judgment or runtime RPC behavior."),
+                    evidence.map { it.evidenceId })
             }
-            val out = cli.output.resolve("source-published-$round")
-            cli.execute("source-$round-publish", "analysis", "publish", "--run", dir, "--out", out)
-            verifyPublished(out, "v1", round == 2)
-            sourceBase = out
+            val descriptor = run.tasks.single { it.taskId == "descriptor" }
+            val researchEvidence = research.targets.single { it.target.targetId == descriptorTarget.targetId }.evidence
+            assertEquals(descriptor.resolution!!.uniqueRef, researchEvidence.ref, "Same entity; only the research evidence namespace differs")
+            assertNotEquals(run.runId, researchEvidence.runId)
+            val invalid = reviews.single { it.taskId == "descriptor" }.copy(evidenceIds = listOf(researchEvidence.evidenceId))
+            val invalidFile = cli.write("reviews/research-is-not-review-evidence.json", AnalysisReviewBatch(runId = run.runId,
+                apkSha256 = run.apk.sha256, items = listOf(invalid)))
+            cli.execute("research-evidence-rejected", "analysis", "submit", "--run", dir, "--review", invalidFile, expectedExit = 2)
+            val reviewFile = cli.write("reviews/source.json", AnalysisReviewBatch(runId = run.runId, apkSha256 = run.apk.sha256, items = reviews))
+            cli.execute("source-submit", "analysis", "submit", "--run", dir, "--review", reviewFile)
         }
-        val sourceOut = sourceBase!!
+        val sourceOut = cli.output.resolve("source-published")
+        cli.execute("source-publish", "analysis", "publish", "--run", sourceDir, "--out", sourceOut)
+        verifyPublished(sourceOut, "v1")
         val source = cli.read<VersionKnowledge>(sourceOut.resolve("knowledge.json"))
         val ledger = cli.result<CorpusTargetPage>("unconfigured-stays-visible", "analysis", "targets", "--corpus", corpusPath,
-            "--run", cli.output.resolve("source-run-2"), "--state", "ALL", "--limit", 20)
+            "--run", sourceDir, "--state", "ALL", "--limit", 20)
         assertEquals("UNCONFIGURED", ledger.items.single { it.target.manualName == "ResearchOnlyTarget" }.state)
-        var targetBase: Path? = null
-        for (round in 1..2) {
-            val dir = cli.output.resolve("target-run-$round")
-            val args = mutableListOf<Any>("migration", "prepare", "--knowledge", sourceOut.resolve("knowledge.json"),
-                "--source-apk", apk("v1"), "--target-apk", apk("v2"), "--run", dir)
-            targetBase?.let { args.addAll(listOf("--target-base", it.resolve("knowledge.json"))) }
-            cli.execute("target-$round-prepare", *args.toTypedArray())
+        val targetDir = cli.output.resolve("target-run")
+        cli.execute("target-prepare", "migration", "prepare", "--knowledge", sourceOut.resolve("knowledge.json"),
+            "--source-apk", apk("v1"), "--target-apk", apk("v2"), "--run", targetDir)
+        run {
+            val dir = targetDir
             val run = cli.read<MigrationRun>(dir.resolve("run.json"))
+            assertEquals("in-run", run.dependencyEvaluation)
             assertRpc(run.anchorTasks.single().resolution!!, "v2", "getGroupInfo", "()Ljava/lang/Object;")
             assertEquals(source.anchors.single().rule, run.anchorTasks.single().rule)
             assertNotEquals(source.anchors.single().resolution.resolutionId, run.anchorTasks.single().resolution!!.resolutionId)
             assertEquals(source.entries.map { it.semanticId }.toSet(), run.tasks.map { it.taskId }.toSet())
-            if (round == 1) assertTrue(run.tasks.all { it.resolution == null && it.executionState == MigrationExecutionState.WAITING_DEPENDENCY })
-            else {
-                val reviews = run.tasks.map { task ->
-                    val role = roleNames.entries.single { it.value == task.entry.name }.key
-                    assertRole(task.resolution!!, "v2", role)
-                    assertEquals(task.entry.ruleRevision, task.rule, "The same knowledge rule is reused, with no manually rebuilt target locator")
-                    assertNotEquals(task.entry.resolution!!.resolutionId, task.resolution!!.resolutionId)
-                    val evidence = inspect("migration", dir, task.taskId)
-                    MigrationReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT,
-                        Confidence.HIGH, true, "Fixture-authored $role responsibility survives the v2 return-type and constructor layout changes.",
-                        listOf("RPC declaration returns Object in v2; constructor role order and marshaller creation change, while the related semantic type remains fixed by source truth."),
-                        listOf("Static fixture truth, not an Agent quality or runtime compatibility measurement."), evidence.map { it.evidenceId })
-                }
-                val file = cli.write("reviews/target.json", MigrationReviewBatch(runId = run.runId, sourceKnowledgeId = source.knowledgeId,
-                    sourceApkSha256 = run.sourceApk.sha256, targetApkSha256 = run.targetApk.sha256, items = reviews))
-                cli.execute("target-submit", "migration", "submit", "--run", dir, "--review", file)
+            val reviews = run.tasks.map { task ->
+                val role = roleNames.entries.single { it.value == task.entry.name }.key
+                assertRole(task.resolution!!, "v2", role)
+                assertEquals(task.entry.ruleRevision, task.rule, "The same knowledge rule is reused, with no manually rebuilt target locator")
+                assertNotEquals(task.entry.resolution!!.resolutionId, task.resolution!!.resolutionId)
+                val evidence = inspect("migration", dir, task.taskId)
+                MigrationReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT,
+                    Confidence.HIGH, true, "Fixture-authored $role responsibility survives the v2 return-type and constructor layout changes.",
+                    listOf("RPC declaration returns Object in v2; constructor role order and marshaller creation change, while the related semantic type remains fixed by source truth."),
+                    listOf("Static fixture truth, not an Agent quality or runtime compatibility measurement."), evidence.map { it.evidenceId })
             }
-            val out = cli.output.resolve("target-published-$round")
-            cli.execute("target-$round-publish", "migration", "publish", "--run", dir, "--out", out)
-            verifyPublished(out, "v2", round == 2)
-            targetBase = out
+            val file = cli.write("reviews/target.json", MigrationReviewBatch(runId = run.runId, sourceKnowledgeId = source.knowledgeId,
+                sourceApkSha256 = run.sourceApk.sha256, targetApkSha256 = run.targetApk.sha256, items = reviews))
+            cli.execute("target-submit", "migration", "submit", "--run", dir, "--review", file)
         }
-        val target = cli.read<VersionKnowledge>(targetBase!!.resolve("knowledge.json"))
+        val targetBase = cli.output.resolve("target-published")
+        cli.execute("target-publish", "migration", "publish", "--run", targetDir, "--out", targetBase)
+        verifyPublished(targetBase, "v2")
+        val target = cli.read<VersionKnowledge>(targetBase.resolve("knowledge.json"))
         assertEquals(source.entries.map { it.semanticId }.toSet(), target.entries.map { it.semanticId }.toSet())
         assertTrue(target.unresolved.isEmpty())
         val replay = cli.output.resolve("target-replay")
-        cli.execute("target-replay", "migration", "publish", "--run", cli.output.resolve("target-run-2"), "--out", replay,
+        cli.execute("target-replay", "migration", "publish", "--run", targetDir, "--out", replay,
             "--at", targetBase.resolve("report.json"))
         assertEquals(Files.readString(targetBase.resolve("knowledge.json")), Files.readString(replay.resolve("knowledge.json")))
-        verifyPublished(replay, "v2", true)
+        verifyPublished(replay, "v2")
         cli.write("summary.json", mapOf("schemaVersion" to 1, "sourceNames" to source.entries.map { it.name },
-            "targetNames" to target.entries.map { it.name }, "researchId" to research.researchId, "roundsPerVersion" to 2,
+            "targetNames" to target.entries.map { it.name }, "researchId" to research.researchId, "preparesPerVersion" to 1,
             "commands" to cli.commandCount, "timings" to cli.timingSummary, "status" to "PASS"))
     }
 
@@ -168,43 +157,35 @@ class RpcRelatedIntegrationTest {
         } }, anchors = cases.map { (key, service) -> AnalysisAnchorDefinition(key, strategy = rpc(service)) })
         val rules = cli.write("inputs/negative.json", definitions)
         for (version in listOf("v1", "v2")) {
-            var base: Path? = null
-            for (round in 1..2) {
-                val dir = cli.output.resolve("$version-negative-run-$round")
-                val args = mutableListOf<Any>("analysis", "prepare", "--apk", apk(version), "--rules", rules, "--run", dir)
-                base?.let { args.addAll(listOf("--base-knowledge", it.resolve("knowledge.json"))) }
-                cli.execute("$version-negative-$round", *args.toTypedArray())
-                val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
-                val methodNames = mapOf("partial" to "partlyUnsupported", "multiple" to "multipleTypes", "duplicate" to "repeatedTypes")
-                run.anchorTasks.forEach { assertRpc(it.resolution!!, version, methodNames.getValue(it.key), "()Ljava/lang/Object;") }
-                assertTrue(run.anchorTasks.single { it.key == "partial" }.resolution!!.matches.any { it.status == MatchStatus.UNKNOWN },
-                    "The upstream METHOD remains unique even when another construction in that same method is unknown")
-                if (round == 1) assertTrue(run.tasks.all { it.resolution == null }) else {
-                    roleTypes.forEach { (role, type) ->
-                        val partial = run.tasks.single { it.taskId == "partial-$role" }.resolution!!
-                        assertEquals(ResolutionStatus.UNKNOWN, partial.status)
-                        assertTrue(partial.matches.none { it.status == MatchStatus.PASS }, "A complete branch must not hide an unsupported construction")
-                        val multiple = run.tasks.single { it.taskId == "multiple-$role" }.resolution!!
-                        assertEquals(ResolutionStatus.AMBIGUOUS, multiple.status)
-                        val other = mapOf("descriptor" to "OtherDescriptor", "builder" to "OtherBuilder", "marshaller" to "OtherWireContract").getValue(role)
-                        assertEquals(setOf(rawType(version, type), rawType(version, other)), multiple.candidates.map { it.ref.descriptor }.toSet())
-                        assertRole(run.tasks.single { it.taskId == "duplicate-$role" }.resolution!!, version, role)
-                    }
-                    val invalidTask = run.tasks.single { it.taskId == "partial-descriptor" }
-                    val invalidReview = cli.write("reviews/$version-invalid.json", AnalysisReviewBatch(runId = run.runId, apkSha256 = run.apk.sha256,
-                        items = listOf(AnalysisReview(invalidTask.taskId, invalidTask.resolution!!.resolutionId, invalidTask.rule.revisionId,
-                            ReviewAction.ACCEPT, "MustNotPublish", Confidence.HIGH, "Deliberate attempt to override unknown construction."))))
-                    cli.execute("$version-unknown-review-rejected", "analysis", "submit", "--run", dir, "--review", invalidReview, expectedExit = 2)
-                }
-                val out = cli.output.resolve("$version-negative-published-$round")
-                cli.execute("$version-negative-publish-$round", "analysis", "publish", "--run", dir, "--out", out)
-                val anchorTruth = methodNames.mapValues { (_, name) -> ExpectedPublishedAnchor(namespace + "RelatedRpcCases", name, "()Ljava/lang/Object;") }
-                val facts = PublishedFixtureAssertions.verify(cli, apk(version), out.resolve("knowledge.json"), oracle.getValue(version), emptyMap(), anchorTruth)
-                assertTrue(facts.entries.isEmpty(), "Even duplicate same-type UNIQUE targets require semantic Review")
-                assertEquals(cases.keys, facts.anchors.map { it.key }.toSet())
-                assertEquals(listOf("tiny\t2\t0\tobfuscated\tnamed"), Files.readAllLines(out.resolve("mapping.tiny")))
-                base = out
+            val dir = cli.output.resolve("$version-negative-run")
+            cli.execute("$version-negative", "analysis", "prepare", "--apk", apk(version), "--rules", rules, "--run", dir)
+            val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
+            val methodNames = mapOf("partial" to "partlyUnsupported", "multiple" to "multipleTypes", "duplicate" to "repeatedTypes")
+            run.anchorTasks.forEach { assertRpc(it.resolution!!, version, methodNames.getValue(it.key), "()Ljava/lang/Object;") }
+            assertTrue(run.anchorTasks.single { it.key == "partial" }.resolution!!.matches.any { it.status == MatchStatus.UNKNOWN },
+                "The upstream METHOD remains unique even when another construction in that same method is unknown")
+            roleTypes.forEach { (role, type) ->
+                val partial = run.tasks.single { it.taskId == "partial-$role" }.resolution!!
+                assertEquals(ResolutionStatus.UNKNOWN, partial.status)
+                assertTrue(partial.matches.none { it.status == MatchStatus.PASS }, "A complete branch must not hide an unsupported construction")
+                val multiple = run.tasks.single { it.taskId == "multiple-$role" }.resolution!!
+                assertEquals(ResolutionStatus.AMBIGUOUS, multiple.status)
+                val other = mapOf("descriptor" to "OtherDescriptor", "builder" to "OtherBuilder", "marshaller" to "OtherWireContract").getValue(role)
+                assertEquals(setOf(rawType(version, type), rawType(version, other)), multiple.candidates.map { it.ref.descriptor }.toSet())
+                assertRole(run.tasks.single { it.taskId == "duplicate-$role" }.resolution!!, version, role)
             }
+            val invalidTask = run.tasks.single { it.taskId == "partial-descriptor" }
+            val invalidReview = cli.write("reviews/$version-invalid.json", AnalysisReviewBatch(runId = run.runId, apkSha256 = run.apk.sha256,
+                items = listOf(AnalysisReview(invalidTask.taskId, invalidTask.resolution!!.resolutionId, invalidTask.rule.revisionId,
+                    ReviewAction.ACCEPT, "MustNotPublish", Confidence.HIGH, "Deliberate attempt to override unknown construction."))))
+            cli.execute("$version-unknown-review-rejected", "analysis", "submit", "--run", dir, "--review", invalidReview, expectedExit = 2)
+            val out = cli.output.resolve("$version-negative-published")
+            cli.execute("$version-negative-publish", "analysis", "publish", "--run", dir, "--out", out)
+            val anchorTruth = methodNames.mapValues { (_, name) -> ExpectedPublishedAnchor(namespace + "RelatedRpcCases", name, "()Ljava/lang/Object;") }
+            val facts = PublishedFixtureAssertions.verify(cli, apk(version), out.resolve("knowledge.json"), oracle.getValue(version), emptyMap(), anchorTruth)
+            assertTrue(facts.entries.isEmpty(), "Even duplicate same-type UNIQUE targets require semantic Review")
+            assertEquals(cases.keys, facts.anchors.map { it.key }.toSet())
+            assertEquals(listOf("tiny\t2\t0\tobfuscated\tnamed"), Files.readAllLines(out.resolve("mapping.tiny")))
         }
         rejectWrongDependencies()
         cli.write("summary.json", mapOf("schemaVersion" to 1, "unknownRoles" to 6, "ambiguousRoles" to 6,
@@ -287,23 +268,17 @@ class RpcRelatedIntegrationTest {
         cli.execute("wrong-producer-before-resolution", "analysis", "prepare", "--apk", apk("v1"), "--rules", invalidDefinitions,
             "--run", cli.output.resolve("wrong-producer-definition"), expectedExit = 2)
         val producers = cli.write("inputs/wrong-producer.json", AnalysisRuleFile(anchors = producerDefinitions))
-        var base: Path? = null
-        for (round in 1..2) {
-            val dir = cli.output.resolve("wrong-producer-run-$round")
-            val args = mutableListOf<Any>("analysis", "prepare", "--apk", apk("v1"), "--rules", producers, "--run", dir)
-            base?.let { args.addAll(listOf("--base-knowledge", it.resolve("knowledge.json"))) }
-            cli.execute("wrong-producer-$round", *args.toTypedArray())
-            val out = cli.output.resolve("wrong-producer-published-$round")
-            cli.execute("wrong-producer-publish-$round", "analysis", "publish", "--run", dir, "--out", out)
-            val facts = PublishedFixtureAssertions.verify(cli, apk("v1"), out.resolve("knowledge.json"), oracle.getValue("v1"), emptyMap(), mapOf(
-                "owner" to ExpectedPublishedAnchor(namespace + "WrongProducer"), "wrong" to ExpectedPublishedAnchor(namespace + "WrongProducer", "create",
-                    "(Ljava/lang/String;Ljava/lang/String;)${sourceType("WrongProducer")}")))
-            assertEquals(if (round == 1) setOf("owner") else setOf("owner", "wrong"), facts.anchors.map { it.key }.toSet())
-            base = out
-        }
+        val producerDir = cli.output.resolve("wrong-producer-run")
+        cli.execute("wrong-producer", "analysis", "prepare", "--apk", apk("v1"), "--rules", producers, "--run", producerDir)
+        val base = cli.output.resolve("wrong-producer-published")
+        cli.execute("wrong-producer-publish", "analysis", "publish", "--run", producerDir, "--out", base)
+        val facts = PublishedFixtureAssertions.verify(cli, apk("v1"), base.resolve("knowledge.json"), oracle.getValue("v1"), emptyMap(), mapOf(
+            "owner" to ExpectedPublishedAnchor(namespace + "WrongProducer"), "wrong" to ExpectedPublishedAnchor(namespace + "WrongProducer", "create",
+                "(Ljava/lang/String;Ljava/lang/String;)${sourceType("WrongProducer")}")))
+        assertEquals(setOf("owner", "wrong"), facts.anchors.map { it.key }.toSet())
         val unrelated = cli.write("inputs/unrelated-producer.json", AnalysisRuleFile(items = listOf(AnalysisRuleItem("unrelated", strategy = related("descriptor", "wrong")))))
         cli.execute("unrelated-method-provenance", "analysis", "prepare", "--apk", apk("v1"), "--rules", unrelated,
-            "--base-knowledge", base!!.resolve("knowledge.json"), "--run", cli.output.resolve("unrelated-provenance"), expectedExit = 2)
+            "--base-knowledge", base.resolve("knowledge.json"), "--run", cli.output.resolve("unrelated-provenance"), expectedExit = 2)
         cli.execute("old-apk-dependency", "analysis", "prepare", "--apk", apk("v2"), "--rules", unrelated,
             "--base-knowledge", base.resolve("knowledge.json"), "--run", cli.output.resolve("old-apk-dependency"), expectedExit = 2)
     }
@@ -327,7 +302,7 @@ class RpcRelatedIntegrationTest {
     private fun inspect(scene: String, dir: Path, id: String) = cli.result<Array<EvidenceRecord>>("${dir.fileName}-$id-inspect",
         scene, "inspect", "--run", dir, "--task", id).toList()
 
-    private fun verifyPublished(out: Path, version: String, complete: Boolean) {
+    private fun verifyPublished(out: Path, version: String) {
         val expectedReturn = if (version == "v1") sourceType("RelatedDescriptor") else "Ljava/lang/Object;"
         val memberTruth = mapOf(
             roleNames.getValue("descriptor") to ExpectedPublishedMembers(fields = listOf(
@@ -337,9 +312,9 @@ class RpcRelatedIntegrationTest {
         val facts = PublishedFixtureAssertions.verify(cli, apk(version), out.resolve("knowledge.json"), oracle.getValue(version),
             roleTypes.map { (role, type) -> roleNames.getValue(role) to namespace + type }.toMap(),
             mapOf("rpc" to ExpectedPublishedAnchor(namespace + "RelatedRpcCases", "getGroupInfo", "()$expectedReturn")), memberTruth)
-        assertEquals(if (complete) roleNames.values.toSet() else emptySet(), facts.entries.map { it.name }.toSet())
+        assertEquals(roleNames.values.toSet(), facts.entries.map { it.name }.toSet())
         assertEquals(setOf("rpc"), facts.anchors.map { it.key }.toSet())
-        if (complete) {
+        run {
             val contract = facts.entries.single { it.name == roleNames.getValue("marshaller") }.clazz
             assertTrue(contract.accessFlags and 0x200 != 0, "The published marshaller role is its declared interface")
             val raw = RawDex.read(apk(version))

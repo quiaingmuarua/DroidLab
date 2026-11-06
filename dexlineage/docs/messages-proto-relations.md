@@ -1,6 +1,6 @@
 # One-hop Proto relation analysis
 
-`messages.proto-relations` restores class roles reached through numbered fields of an already resolved Proto parent. It uses the existing Analysis workspace, review journal and publication rules. The parent is a CLASS support anchor; it is not a renamed entry and does not enter Tiny Mapping.
+`messages.proto-relations` restores class roles reached through numbered fields of an already resolved Proto parent. It uses one Analysis execution and the existing review/publication rules. The parent is a CLASS support anchor; it is not a renamed entry and does not enter Tiny Mapping.
 
 The supported target is a **singular message type** or the **element type of a repeated message field**. The matcher reads the generated Lite message metadata and its actual field/type relationships from DEX. A rule selects a field number and cardinality, not a Java declaration position, an obfuscated field name or an expected child descriptor. Scalar fields can appear in the catalogue but cannot become class rename targets through this rule.
 
@@ -12,7 +12,7 @@ The initial decoder accepts the observed proto3 layout, presence fields, support
 
 Copy these public examples into an external private case directory and replace their fictional service/RPC inputs and field selectors with inspected facts:
 
-- [Workspace configuration](../examples/proto-relations-workspace.json)
+- [Analysis configuration](../examples/proto-relations-workspace.json)
 - [Two-level parent seed rules](../examples/proto-relations-seeds.json)
 - [Relation profile](../examples/proto-relations-profile.json)
 
@@ -20,19 +20,13 @@ The method profile declares `targets`, each with `key`, positive integer `fieldN
 
 The profile's discovery strategy is `messages.proto-fields`, with empty parameters and a `parent` dependency. The method emits one `messages.proto-field-type` rule for **every declared target**, including targets with no discovered child. Drafts do not use a child `discoveryKey`. `prepare` executes the numbered-field rules again; discovery facts never become candidate input or publication authority. This keeps absent fields and unsupported relationships visible as ordinary invalid tasks.
 
-The method uses two seed rounds. With the example above:
+The method resolves the RPC METHOD and request Proto CLASS in dependency order within the same execution, then discovers parent fields and matches the configured targets. Both prerequisites are ordinary rules; their definitions, not a fixed number of rounds, determine the order. A failed prerequisite blocks the associated work without inventing an empty successful discovery.
 
-1. Resolve the RPC METHOD anchor.
-2. Resolve the request Proto CLASS anchor using that prior snapshot.
-3. Discover parent fields, prepare the fixed target rules, and produce the review packet.
-
-Both seeds are ordinary executable rules. A different inspected parent rule can replace the example seed definitions; it must still fit the declared finite seed plan. The method does not search class names or copy a parent's old APK address.
-
-For an independent slice, omit `baseKnowledge`: passing a complete knowledge package as base would intentionally carry all of its confirmed entries into the new publication. An anchor-only seed publication keeps this slice limited to the reviewed children.
+For an independent slice, omit `baseKnowledge`: a complete base intentionally carries its existing confirmed entries into publication. No intermediate anchor publication is required.
 
 ## Use a manual corpus
 
-The workspace configuration accepts an optional `corpus` path, resolved relative to the configuration file:
+The analysis configuration accepts an optional `corpus` path, resolved relative to the configuration file:
 
 ```json
 {
@@ -44,7 +38,7 @@ The workspace configuration accepts an optional `corpus` path, resolved relative
 }
 ```
 
-Import the corpus with the existing `analysis import-jadx` command, then select actual target IDs from `analysis targets`. In a profile row, replace the example `proposedName` with that target's `corpusTargetId`. The workspace checks that declared corpus targets exist and that the corpus belongs to the supplied APK before executing seeds. It freezes the corpus, original annotation project and APK digests, and passes the corpus only to the final target preparation.
+Import the corpus with the existing `analysis import-jadx` command, then select actual target IDs from `analysis targets`. In a profile row, replace the example `proposedName` with that target's `corpusTargetId`. The analysis entry checks that declared corpus targets exist and that the corpus belongs to the supplied APK before executing seeds. It freezes the corpus, original annotation project and APK digests, and passes the corpus only to the final target preparation.
 
 The original manual class is checked **after matching**. It never restricts the matcher. A unique result that disagrees with the manual source remains invalid. Review packets use the manual spelling when neither a canonical existing name nor an explicit proposal is present; the reviewer still has to read the evidence and submit a judgment. Importing a name does not accept it.
 
@@ -57,37 +51,32 @@ From the DroidLab root, run `./gradlew -Pandroid=false :dexlineage:build :dexlin
 ```powershell
 $cli = '.\build\install\dexlineage\bin\dexlineage.bat'
 & $cli analysis run --method messages.proto-relations --config ..\private-research\dexlineage\proto\proto-relations-workspace.json --work ..\private-research\dexlineage\proto\source-work
-& $cli analysis status --work ..\private-research\dexlineage\proto\source-work
 ```
 
-At `WAITING_REVIEW`, use the returned `runPath` and `packetPath`. Read the parent metadata, child code and dependency evidence. Copy `review-template.json` out of the immutable workspace, fill the action, confidence, semantic rationale and unverified scope, then submit it:
+Use the returned `runPath` and `packetPath`. Read the parent metadata, child code and dependency evidence. Copy `review-template.json` to a separate review file, fill the action, confidence, semantic rationale and unverified scope, then submit it:
 
 ```powershell
 & $cli analysis submit --run '<runPath>' --review ..\private-research\dexlineage\proto\source-review.json
-& $cli analysis resume --work ..\private-research\dexlineage\proto\source-work
+& $cli analysis publish --run '<runPath>' --out ../private-research/dexlineage/proto/source-published
 ```
 
-Selected invalid tasks need no artificial Review. A valid ACCEPT still requires a unique result and the existing evidence/conflict checks. `resume` freezes the journal revisions and publishes; repeated COMPLETE resumes return the same package.
+Selected invalid tasks need no artificial Review. A valid ACCEPT still requires a unique result and the existing evidence/conflict checks. Publication is explicit. Interrupted analysis is rerun in a new output directory; saved publication decisions can still be replayed with `publish --at`.
 
 The source publication includes `knowledge.json`, class-only `mapping.tiny`, `report.json`, code evidence, the raw typed catalogue, and a readable `proto-catalog.json`. Each configured row shows its selector, observed types and final matching/review state. An observed type is a fact for investigation, not a confirmed binding.
 
 ## Migrate the same knowledge
 
-Give the source publication's **unchanged** `knowledge.json` to the existing Migration commands. For the two-level example, use three immutable runs: RPC anchor, parent Proto anchor, then child targets.
+Give the source publication's **unchanged** `knowledge.json` to one Migration prepare. The current target RPC, parent and child roles are resolved within that execution:
 
 ```powershell
 $sourceKnowledge = '<source knowledgePath>'
-& $cli migration prepare --knowledge $sourceKnowledge --source-apk ..\private-research\dexlineage\proto\source.apk --target-apk ..\private-research\dexlineage\proto\target.apk --run ..\private-research\dexlineage\proto\migration-1
-& $cli migration publish --run ..\private-research\dexlineage\proto\migration-1 --out ..\private-research\dexlineage\proto\target-round-1
-& $cli migration prepare --knowledge $sourceKnowledge --source-apk ..\private-research\dexlineage\proto\source.apk --target-apk ..\private-research\dexlineage\proto\target.apk --target-base ..\private-research\dexlineage\proto\target-round-1\knowledge.json --run ..\private-research\dexlineage\proto\migration-2
-& $cli migration publish --run ..\private-research\dexlineage\proto\migration-2 --out ..\private-research\dexlineage\proto\target-round-2
-& $cli migration prepare --knowledge $sourceKnowledge --source-apk ..\private-research\dexlineage\proto\source.apk --target-apk ..\private-research\dexlineage\proto\target.apk --target-base ..\private-research\dexlineage\proto\target-round-2\knowledge.json --run ..\private-research\dexlineage\proto\migration-3
-& $cli migration tasks --run ..\private-research\dexlineage\proto\migration-3 --state ALL
+& $cli migration prepare --knowledge $sourceKnowledge --source-apk ../private-research/dexlineage/proto/source.apk --target-apk ../private-research/dexlineage/proto/target.apk --run ../private-research/dexlineage/proto/migration-001
+& $cli migration inspect --run ../private-research/dexlineage/proto/migration-001 --out ../private-research/dexlineage/proto/migration-packet
 ```
 
 Inspect the ready targets, submit continuity Reviews with the existing Migration format, then publish and run `knowledge verify`. The target set and semantic names remain fixed by the source knowledge. Unresolved children preserve their last confirmed source instead of receiving guessed target bindings. The source's parent address cannot satisfy a target dependency.
 
-Migration preserves matching's raw typed catalogue as an opaque artifact. Its relative path and digest appear in `report.json` under `methodArtifacts`; resolve the path from the publication directory. It does not call the Analysis method or reinterpret the catalogue. A wholly inherited round may carry these artifacts from its frozen target-base report, recording `methodArtifactSource`; fresh matching uses its own artifacts. Published copies remain usable after moving the package. Existing knowledge and Mapping verification remain independent of the catalogue projection.
+Migration preserves matching's raw typed catalogue as an opaque artifact. Its relative path and digest appear in `report.json` under `methodArtifacts`; resolve the path from the publication directory. It does not call the Analysis method or reinterpret the catalogue. A wholly inherited continuation may carry these artifacts from its frozen target-base report, recording `methodArtifactSource`; fresh matching uses its own artifacts. Published copies remain usable after moving the package. Existing knowledge and Mapping verification remain independent of the catalogue projection.
 
 ## Verification boundary
 

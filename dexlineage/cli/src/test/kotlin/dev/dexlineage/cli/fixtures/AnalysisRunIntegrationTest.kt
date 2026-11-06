@@ -10,9 +10,9 @@ import java.nio.file.Path
 import java.util.UUID
 import kotlin.test.*
 
-/** The production workspace orchestrates the same matching/review/publication path as the individual commands. */
+/** Single execution produces one matching run; review and publication remain explicit. */
 @Tag("fixture-integration")
-class AnalysisWorkspaceIntegrationTest {
+class AnalysisRunIntegrationTest {
     private val namespace = "dev.dexlineage.fixture.theme."
     private val services = listOf("Group", "Registration", "Messaging", "Abuse").map { "fixture.theme.$it" }
     private val aliases = linkedMapOf(
@@ -22,12 +22,12 @@ class AnalysisWorkspaceIntegrationTest {
         "SharedRecord" to "FixtureSharedRecord", "AbuseResponse" to "FixtureAbuseResponse",
         "DuplicateRequest" to "FixtureDuplicateRequest", "DuplicateResponse" to "FixtureDuplicateResponse")
 
-    @Test fun `Messages method creates review packets and publishes after explicit resume in both R8 versions`() {
+    @Test fun `Messages method creates review packets and publishes after explicit review in both R8 versions`() {
         val fixture = Path.of(System.getProperty("dexlineage.fixtureRoot"))
         val repo = fixture.parent.parent
         val manifest = FixtureManifest.read(Path.of(System.getProperty("dexlineage.fixtureCases")))
         val cli = FixtureCli(Path.of(System.getProperty("dexlineage.distributionDir")),
-            Path.of(System.getProperty("dexlineage.fixtureResults")).resolve("analysis-workspace-${UUID.randomUUID()}"), repo)
+            Path.of(System.getProperty("dexlineage.fixtureResults")).resolve("analysis-run-${UUID.randomUUID()}"), repo)
         FixturePreflight.verify(fixture, Path.of(System.getProperty("dexlineage.fixtureCases")), cli.output.resolve("preflight"))
         val anchors = AnalysisRuleFile(anchors = listOf(
             AnalysisAnchorDefinition("rpc.seed", strategy = StrategySpec("messages.rpc-descriptor",
@@ -37,7 +37,7 @@ class AnalysisWorkspaceIntegrationTest {
             AnalysisAnchorDefinition("rpc.full-name", strategy = StrategySpec("grpc-java.full-method-name",
                 resultKind = EntityKind.METHOD, requires = mapOf("descriptor" to "rpc.descriptor")))))
         val seed = cli.write("inputs/seed.json", anchors)
-        val profile = cli.write("inputs/profile.json", mapOf("schemaVersion" to SCHEMA_VERSION, "id" to "workspace-fixture",
+        val profile = cli.write("inputs/profile.json", mapOf("schemaVersion" to SCHEMA_VERSION, "id" to "analysis-fixture",
             "strategy" to StrategySpec("grpc-java.rpc-discovery", requires = mapOf("nameFactory" to "rpc.full-name")),
             "rpcDrafts" to mapOf("reviewServices" to services)))
         for (version in listOf("v1", "v2")) {
@@ -45,9 +45,8 @@ class AnalysisWorkspaceIntegrationTest {
             val oracle = R8Oracle(repo.resolve(manifest.versions.getValue(version).mapping))
             val config = cli.write("inputs/$version-config.json", mapOf("schemaVersion" to SCHEMA_VERSION,
                 "apk" to apk.toString(), "profile" to profile.toString(), "seedRules" to seed.toString()))
-            val work = cli.output.resolve("$version-workspace")
+            val work = cli.output.resolve("$version-analysis")
             val started = cli.execute("$version-run", "analysis", "run", "--method", "messages.grpc", "--config", config, "--work", work).asJsonObject
-            assertEquals("WAITING_REVIEW", started["state"].asString)
             val runDir = Path.of(started["runPath"].asString)
             val packetDir = Path.of(started["packetPath"].asString)
             val run = cli.read<AnalysisRun>(runDir.resolve("run.json"))
@@ -58,11 +57,12 @@ class AnalysisWorkspaceIntegrationTest {
             assertTrue(template.items.none { it.action == ReviewAction.ACCEPT && it.level == Confidence.HIGH })
             cli.execute("$version-draft-is-not-review", "analysis", "submit", "--run", runDir,
                 "--review", packetDir.resolve("review-template.json"), expectedExit = 2)
-            val status = cli.execute("$version-status", "analysis", "status", "--work", work).asJsonObject
-            assertEquals("WAITING_REVIEW", status["state"].asString)
-            val pending = cli.execute("$version-resume-before-review", "analysis", "resume", "--work", work).asJsonObject
-            assertEquals("WAITING_REVIEW", pending["state"].asString)
-            assertEquals(started["runPath"], pending["runPath"], "A fresh process must reuse the completed matching stage")
+            assertEquals("in-run", run.dependencyEvaluation)
+            assertEquals(3, run.resolvedAnchors!!.size)
+            Files.walk(work).use { paths -> assertEquals(1, paths.filter { it.fileName.toString() == "run.json" }.count().toInt()) }
+            Files.walk(work).use { paths -> assertFalse(paths.anyMatch { it.fileName.toString() in setOf("knowledge.json", "receipt.json", "workspace.json") }) }
+            cli.execute("$version-status-retired", "analysis", "status", "--work", work, expectedExit = 2)
+            cli.execute("$version-resume-retired", "analysis", "resume", "--work", work, expectedExit = 2)
 
             // Source-authored identities are checked BEFORE semantic fixture truth is submitted.
             val expected = aliases.mapKeys { oracle.descriptor(namespace + it.key) }
@@ -90,9 +90,9 @@ class AnalysisWorkspaceIntegrationTest {
             val reviewFile = cli.write("reviews/$version.json", template.copy(items = reviews))
             cli.execute("$version-submit", "analysis", "submit", "--run", runDir, "--review", reviewFile)
             cli.execute("$version-submit-idempotent", "analysis", "submit", "--run", runDir, "--review", reviewFile)
-            val finished = cli.execute("$version-resume-publish", "analysis", "resume", "--work", work).asJsonObject
-            assertEquals("COMPLETE", finished["state"].asString)
-            val knowledgeFile = Path.of(finished["knowledgePath"].asString)
+            val output = cli.output.resolve("$version-published")
+            cli.execute("$version-publish", "analysis", "publish", "--run", runDir, "--out", output)
+            val knowledgeFile = output.resolve("knowledge.json")
             val published = cli.read<VersionKnowledge>(knowledgeFile)
             assertEquals(aliases.values.toSet(), published.entries.map { it.name }.toSet())
             assertEquals(aliases.size, published.entries.map { it.binding }.distinct().size)
@@ -105,8 +105,6 @@ class AnalysisWorkspaceIntegrationTest {
                 aliases.entries.associate { it.value to namespace + it.key }, anchorTruth)
             cli.execute("$version-jadx-readback", "knowledge", "verify", "--knowledge", knowledgeFile,
                 "--apk", apk, "--work", cli.output.resolve("$version-readback"))
-            val repeat = cli.execute("$version-resume-complete", "analysis", "resume", "--work", work).asJsonObject
-            assertEquals(finished["knowledgePath"], repeat["knowledgePath"])
             val replay = cli.output.resolve("$version-publication-replay")
             cli.execute("$version-replay", "analysis", "publish", "--run", runDir, "--at", knowledgeFile.parent.resolve("report.json"), "--out", replay)
             assertEquals(Files.readString(knowledgeFile), Files.readString(replay.resolve("knowledge.json")))
@@ -125,8 +123,7 @@ class AnalysisWorkspaceIntegrationTest {
                 val relocatedConfig = cli.write("inputs/relocated-config.json", mapOf("schemaVersion" to SCHEMA_VERSION,
                     "apk" to apk.toString(), "profile" to relocatedProfile.toString(), "baseKnowledge" to relocated.resolve("knowledge.json").toString()))
                 val loaded = cli.execute("relocated-base", "analysis", "run", "--method", "profile", "--config", relocatedConfig,
-                    "--work", cli.output.resolve("relocated-workspace")).asJsonObject
-                assertEquals("WAITING_REVIEW", loaded["state"].asString)
+                    "--work", cli.output.resolve("relocated-analysis")).asJsonObject
                 val loadedRun = cli.read<AnalysisRun>(Path.of(loaded["runPath"].asString).resolve("run.json"))
                 assertEquals(published.knowledgeId, loadedRun.baseKnowledge!!.knowledgeId)
                 assertEquals(published.entries.single { it.binding.descriptor == oracle.descriptor(namespace + "GroupRequest") }.semanticId,
@@ -135,12 +132,12 @@ class AnalysisWorkspaceIntegrationTest {
         }
     }
 
-    @Test fun `profile method reuses the same workspace and packet path for private logger matching`() {
+    @Test fun `profile method uses the same single execution and packet path for private logger matching`() {
         val fixture = Path.of(System.getProperty("dexlineage.fixtureRoot"))
         val repo = fixture.parent.parent
         val manifest = FixtureManifest.read(Path.of(System.getProperty("dexlineage.fixtureCases")))
         val cli = FixtureCli(Path.of(System.getProperty("dexlineage.distributionDir")),
-            Path.of(System.getProperty("dexlineage.fixtureResults")).resolve("profile-workspace-${UUID.randomUUID()}"), repo)
+            Path.of(System.getProperty("dexlineage.fixtureResults")).resolve("profile-analysis-${UUID.randomUUID()}"), repo)
         val scenario = manifest.cases.single { it.id == "privateCache" }
         val expected = scenario.versions.getValue("v1")
         val oracle = R8Oracle(repo.resolve(manifest.versions.getValue("v1").mapping))
@@ -148,7 +145,7 @@ class AnalysisWorkspaceIntegrationTest {
             FactorSpec("invocation-kind", invocationKind = "STATIC"),
             FactorSpec("method-signature", parameterTypes = listOf("Ljava/lang/String;", "Ljava/lang/String;"), returnSameAsField = true),
             FactorSpec("argument-string", index = 1, value = scenario.component), FactorSpec("assignment-owner"))
-        val profile = cli.write("profile.json", AnalysisProfile(id = "private-logger-workspace",
+        val profile = cli.write("profile.json", AnalysisProfile(id = "private-logger-analysis",
             discovery = Locator("field-initializer", scenario.component, factors, listOf(CaptureSpec("component", 1))),
             nameCapture = "component", locatorTemplate = LocatorTemplate("field-initializer", "component",
                 factors.map { if (it.kind == "argument-string") it.copy(value = null, valueFromCapture = "component") else it })))
@@ -156,7 +153,6 @@ class AnalysisWorkspaceIntegrationTest {
         val config = cli.write("config.json", mapOf("schemaVersion" to SCHEMA_VERSION, "apk" to apk.toString(), "profile" to profile.toString()))
         val work = cli.output.resolve("work")
         val started = cli.execute("run", "analysis", "run", "--method", "profile", "--config", config, "--work", work).asJsonObject
-        assertEquals("WAITING_REVIEW", started["state"].asString)
         val runDir = Path.of(started["runPath"].asString)
         val run = cli.read<AnalysisRun>(runDir.resolve("run.json"))
         assertEquals(oracle.descriptor(expected.owners.single()), run.tasks.single().resolution!!.uniqueRef!!.descriptor)
@@ -166,14 +162,14 @@ class AnalysisWorkspaceIntegrationTest {
             unverified = listOf("Static integration truth only."))))
         val file = cli.write("review.json", review)
         cli.execute("submit", "analysis", "submit", "--run", runDir, "--review", file)
-        val finished = cli.execute("resume", "analysis", "resume", "--work", work).asJsonObject
-        assertEquals("COMPLETE", finished["state"].asString)
-        val published = Path.of(finished["knowledgePath"].asString)
+        val output = cli.output.resolve("published")
+        cli.execute("publish", "analysis", "publish", "--run", runDir, "--out", output)
+        val published = output.resolve("knowledge.json")
         PublishedFixtureAssertions.verify(cli, apk, published, oracle, mapOf(scenario.semanticAlias to expected.owners.single()))
         cli.execute("readback", "knowledge", "verify", "--knowledge", published, "--apk", apk, "--work", cli.output.resolve("readback"))
-        val changed = cli.gson.toJsonTree(cli.read<JsonObject>(config)).asJsonObject.apply { addProperty("apk", "changed.apk") }
-        Files.writeString(config, cli.gson.toJson(changed))
-        cli.execute("changed-input", "analysis", "resume", "--work", work, expectedExit = 2)
+        cli.execute("same-output-is-not-resumed", "analysis", "run", "--method", "profile", "--config", config, "--work", work, expectedExit = 2)
+        cli.execute("resume-retired", "analysis", "resume", "--work", work, expectedExit = 2)
+
     }
 
     private fun json(cli: FixtureCli, vararg entries: Pair<String, Any>) = cli.gson.toJsonTree(entries.toMap()).asJsonObject

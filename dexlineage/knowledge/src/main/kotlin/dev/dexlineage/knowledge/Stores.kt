@@ -82,8 +82,7 @@ object KnowledgeFiles {
 
     fun copyEvidence(sourceRoot: Path, output: Path, evidence: KnowledgeEvidence): KnowledgeEvidence {
         verifyCode(sourceRoot, evidence.evidenceId, evidence.javaPath, evidence.javaSha256, evidence.smaliPath, evidence.smaliSha256)
-        val folder = output.resolve("evidence/${evidence.evidenceId}")
-        Files.createDirectories(folder)
+        Files.createDirectories(output.resolve(evidence.javaPath).parent)
         copyOrVerify(sourceRoot.resolve(evidence.javaPath), output.resolve(evidence.javaPath), evidence.javaSha256)
         evidence.smaliPath?.let { copyOrVerify(sourceRoot.resolve(it), output.resolve(it), evidence.smaliSha256!!) }
         return evidence
@@ -244,9 +243,14 @@ object NameChecks {
     }
 }
 
-private fun verifyCode(root: Path, id: String, javaPath: String, javaHash: String, smaliPath: String?, smaliHash: String?) {
+internal fun verifyCode(root: Path, id: String, javaPath: String, javaHash: String, smaliPath: String?, smaliHash: String?) {
     requireInput(id.matches(Regex("[a-f0-9]{64}")), "Invalid evidence ID")
-    requireInput(javaPath == "evidence/$id/code.java" && (smaliPath == null || smaliPath == "evidence/$id/code.smali"), "Invalid evidence path")
+    val namespace = when (javaPath) {
+        "evidence/$id/code.java" -> "evidence"
+        "dependency-evidence/$id/code.java" -> "dependency-evidence"
+        else -> throw ValidationException("Invalid evidence path")
+    }
+    requireInput(smaliPath == null || smaliPath == "$namespace/$id/code.smali", "Invalid evidence path")
     requireInput(Files.isRegularFile(root.resolve(javaPath)) && Digests.file(root.resolve(javaPath)) == javaHash, "Evidence Java content missing or changed: $id")
     if (smaliPath != null) requireInput(Files.isRegularFile(root.resolve(smaliPath)) && Digests.file(root.resolve(smaliPath)) == smaliHash, "Evidence Smali content missing or changed: $id")
     else requireInput(smaliHash == null, "Smali hash without file")

@@ -20,7 +20,7 @@ class MessagesProtoAnalysisMethodTest {
     @Test fun `declared relation targets are drafted even when discovery has no child facts`() {
         val p = profile(); val method = AnalysisMethods.forProfile(p)
         method.validate(p)
-        assertEquals(2, method.seedRounds)
+        assertTrue(method.requiresSeeds)
         assertEquals(setOf("manual-one"), method.corpusTargetIds(p))
         val items = method.drafts(p, emptyList())
         assertEquals(listOf("one", "two"), items.map { it.key })

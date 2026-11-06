@@ -14,12 +14,12 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 data class AnalysisMethodPlan(val methodId: String, val profileFile: Artifact, val profile: AnalysisProfile,
-    val seedRulesFile: Artifact?, val seedSteps: List<AnalysisRuleFile>, val inputArtifacts: List<Artifact>)
+    val seedRulesFile: Artifact?, val seedRules: AnalysisRuleFile?, val inputArtifacts: List<Artifact>)
 
 /** A compiled analysis method interprets facts and proposes work. It cannot publish a binding. */
 interface AnalysisMethod {
     val id: String
-    val seedRounds: Int get() = 0
+    val requiresSeeds: Boolean get() = false
     fun validate(profile: AnalysisProfile)
     fun leads(apk: Artifact, profile: AnalysisProfile, facts: List<MatchFact>): List<DiscoveryLead>
     fun drafts(profile: AnalysisProfile, leads: List<DiscoveryLead>): List<AnalysisRuleItem>
@@ -61,10 +61,10 @@ object AnalysisMethods {
         val profile = read.copy(method = read.method ?: AnalysisMethodSpec(methodId), compatibility = null)
         method.validate(profile)
         val seedFile = path("seedRules")?.let(Digests::artifact)
-        requireInput((method.seedRounds == 0) == (seedFile == null), if (method.seedRounds == 0) "Method $methodId does not use seed rules" else "Method $methodId requires seedRules")
+        requireInput(method.requiresSeeds == (seedFile != null), if (!method.requiresSeeds) "Method $methodId does not use seed rules" else "Method $methodId requires seedRules")
         val seed = seedFile?.let { AnalysisService.readRules(Path.of(it.path)) }
         requireInput(seed == null || seed.items.isEmpty() && seed.anchors.isNotEmpty() && seed.discovery == null, "Seed rules must contain only anchor definitions")
-        AnalysisMethodPlan(methodId, profileFile, profile, seedFile, if (seed == null) emptyList() else List(method.seedRounds) { seed },
+        AnalysisMethodPlan(methodId, profileFile, profile, seedFile, seed,
             listOfNotNull(profileFile, seedFile))
     }
 

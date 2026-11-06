@@ -86,7 +86,7 @@ class ProtoIntegrationTest {
             "limitation" to "Only generated fields in dev.dexlineage.fixture.proto retain names so protoc reflection metadata stays valid with R8 optimization disabled. Classes and methods are renamed."))
     }
 
-    @Test fun `protoc message fields publish through workspace and migrate by stable tags despite renamed fields`() {
+    @Test fun `protoc message fields publish through single execution and migrate by stable tags despite renamed fields`() {
         setup("flow")
         val targets = listOf(
             mapOf("key" to "credential", "fieldNumber" to 1, "cardinality" to "singular", "proposedName" to names.getValue("credential")),
@@ -94,10 +94,9 @@ class ProtoIntegrationTest {
             mapOf("key" to "missing", "fieldNumber" to 99, "cardinality" to "singular", "proposedName" to "MissingProto"),
             mapOf("key" to "wrong-cardinality", "fieldNumber" to 1, "cardinality" to "repeated", "proposedName" to "WrongCardinality"))
         val config = config("source", "v1", "fixtureParentAnchor_", targets)
-        val workspace = cli.output.resolve("workspace")
+        val workspace = cli.output.resolve("analysis")
         val started = cli.execute("analysis-run", "analysis", "run", "--method", "messages.proto-relations", "--config", config,
             "--work", workspace).asJsonObject
-        assertEquals("WAITING_REVIEW", started["state"].asString)
         val runDir = Path.of(started["runPath"].asString)
         val run = cli.read<AnalysisRun>(runDir.resolve("run.json"))
         assertEquals(targets.map { it.getValue("key") }.toSet(), run.tasks.map { it.taskId }.toSet(), "Absent and wrong-cardinality targets must remain visible")
@@ -117,8 +116,8 @@ class ProtoIntegrationTest {
         verifyCatalogue(catalogue.fieldCatalogue, "v1")
         val templateFile = Path.of(started["packetPath"].asString).resolve("review-template.json")
         cli.execute("template-not-review", "analysis", "submit", "--run", runDir, "--review", templateFile, expectedExit = 2)
-        val waiting = cli.execute("resume-unreviewed", "analysis", "resume", "--work", workspace).asJsonObject
-        assertEquals("WAITING_REVIEW", waiting["state"].asString)
+        assertEquals("in-run", run.dependencyEvaluation)
+        cli.execute("resume-retired", "analysis", "resume", "--work", workspace, expectedExit = 2)
         val template = cli.read<AnalysisReviewBatch>(templateFile)
         val reviews = template.items.filter { it.taskId in owners }.map { item -> item.copy(action = ReviewAction.ACCEPT,
             level = Confidence.HIGH, name = names.getValue(item.taskId),
@@ -127,9 +126,9 @@ class ProtoIntegrationTest {
         assertEquals(2, reviews.size)
         val review = cli.write("reviews/source.json", template.copy(items = reviews))
         cli.execute("submit", "analysis", "submit", "--run", runDir, "--review", review)
-        val complete = cli.execute("resume-publish", "analysis", "resume", "--work", workspace).asJsonObject
-        assertEquals("COMPLETE", complete["state"].asString)
-        val sourceFile = Path.of(complete["knowledgePath"].asString)
+        val sourceOut = cli.output.resolve("source-published")
+        cli.execute("source-publish", "analysis", "publish", "--run", runDir, "--out", sourceOut)
+        val sourceFile = sourceOut.resolve("knowledge.json")
         val source = cli.read<VersionKnowledge>(sourceFile)
         verifyPublished(sourceFile, "v1")
         val publishedCatalogue = cli.read<ProtoAnalysisCatalog>(sourceFile.parent.resolve("proto-catalog.json"))
@@ -138,40 +137,45 @@ class ProtoIntegrationTest {
 
         var targetBase: Path? = null
         var previous: VersionKnowledge? = null
-        for (round in 1..3) {
-            val dir = cli.output.resolve("target-run-$round")
+        for (phase in listOf("fresh", "continuation")) {
+            val dir = cli.output.resolve("target-run-$phase")
             val args = mutableListOf<Any>("migration", "prepare", "--knowledge", sourceFile, "--source-apk", apk("v1"), "--target-apk", apk("v2"), "--run", dir)
             targetBase?.let { args.addAll(listOf("--target-base", it)) }
-            cli.execute("migration-$round-prepare", *args.toTypedArray())
+            cli.execute("migration-$phase-prepare", *args.toTypedArray())
             val migration = cli.read<MigrationRun>(dir.resolve("run.json"))
             assertEquals(2, migration.tasks.size)
-            if (round == 1) assertTrue(migration.tasks.all { it.executionState == MigrationExecutionState.WAITING_DEPENDENCY })
-            if (round == 2) {
+            assertEquals("in-run", migration.dependencyEvaluation)
+            if (phase == "fresh") {
+                val packetDir = cli.output.resolve("migration-packet")
+                cli.execute("migration-packet", "migration", "inspect", "--run", dir, "--out", packetDir)
+                val templateFile = packetDir.resolve("review-template.json")
+                val template = cli.read<MigrationReviewBatch>(templateFile)
+                assertEquals(migration.runId, template.runId)
+                cli.execute("migration-blank-template", "migration", "submit", "--run", dir, "--review", templateFile, expectedExit = 2)
                 val items = migration.tasks.map { task ->
                     val key = names.entries.single { it.value == task.entry.name }.key
                     assertEquals(ResolutionStatus.UNIQUE, task.resolution!!.status)
                     assertEquals(raw("v2", owners.getValue(key)), task.resolution!!.uniqueRef!!.descriptor)
                     assertEquals(task.entry.ruleRevision, task.rule)
-                    val evidence = cli.result<Array<EvidenceRecord>>("migration-inspect-$key", "migration", "inspect", "--run", dir, "--task", task.taskId)
-                    MigrationReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT, Confidence.HIGH, true,
-                        "Source-authored message role remains at the same wire tag/cardinality after generated field names and R8 identities change.",
-                        listOf("Parent field names and declaration order change; an unrelated scalar is removed and another added."),
-                        listOf("Static fixture semantics only; generated field names are deliberately kept in this package to preserve RawMessageInfo."), evidence.map { it.evidenceId })
+                    val draft = template.items.single { it.taskId == task.taskId }
+                    assertEquals(task.resolution!!.resolutionId, draft.resolutionId)
+                    assertEquals(task.rule.revisionId, draft.ruleRevisionId)
+                    assertTrue(draft.evidenceIds.isNotEmpty())
+                    draft.copy(action = ReviewAction.ACCEPT, level = Confidence.HIGH, nameStillApplies = true,
+                        identityReason = "Source-authored message role remains at the same wire tag/cardinality after generated field names and R8 identities change.",
+                        changes = listOf("Parent field names and declaration order change; an unrelated scalar is removed and another added."),
+                        unverified = listOf("Static fixture semantics only; generated field names are deliberately kept in this package to preserve RawMessageInfo."))
                 }
                 val file = cli.write("reviews/migration.json", MigrationReviewBatch(runId = migration.runId, sourceKnowledgeId = source.knowledgeId,
                     sourceApkSha256 = migration.sourceApk.sha256, targetApkSha256 = migration.targetApk.sha256, items = items))
                 cli.execute("migration-submit", "migration", "submit", "--run", dir, "--review", file)
             }
-            if (round == 3) assertTrue(migration.tasks.all { it.executionState == MigrationExecutionState.INHERITED }, "Third round tests continuation, not a claimed extra matching dependency")
-            val out = cli.output.resolve("target-published-$round")
-            cli.execute("migration-$round-publish", "migration", "publish", "--run", dir, "--out", out)
+            if (phase == "continuation") assertTrue(migration.tasks.all { it.executionState == MigrationExecutionState.INHERITED }, "Confirmed target-base reuse needs no extra dependency execution")
+            val out = cli.output.resolve("target-published-$phase")
+            cli.execute("migration-$phase-publish", "migration", "publish", "--run", dir, "--out", out)
             val file = out.resolve("knowledge.json")
             val knowledge = cli.read<VersionKnowledge>(file)
-            if (round == 1) {
-                assertTrue(knowledge.entries.isEmpty())
-                assertEquals(source.entries.map { it.semanticId }.toSet(), knowledge.unresolved.map { it.entry.semanticId }.toSet())
-                PublishedFixtureAssertions.verify(cli, apk("v2"), file, oracles.getValue("v2"), emptyMap(), parentTruth("ParentMessage"))
-            } else {
+            run {
                 verifyPublished(file, "v2")
                 assertEquals(source.entries.map { it.semanticId }.toSet(), knowledge.entries.map { it.semanticId }.toSet())
                 knowledge.entries.forEach { e ->
@@ -182,7 +186,7 @@ class ProtoIntegrationTest {
                 }
                 verifyCatalogue(rawCatalogue(out), "v2")
             }
-            if (round == 3) {
+            if (phase == "continuation") {
                 assertEquals(previous!!.entries, knowledge.entries)
                 assertEquals(Files.readString(targetBase!!.parent.resolve("mapping.tiny")), Files.readString(out.resolve("mapping.tiny")))
                 val replay = cli.output.resolve("migration-replay")
@@ -194,7 +198,7 @@ class ProtoIntegrationTest {
             previous = knowledge
         }
         cli.write("summary.json", mapOf("schemaVersion" to 1, "status" to "PASS", "analysisTargets" to 4, "publishedClasses" to 2,
-            "migrationRounds" to 3, "roundThree" to "inherited continuation", "commands" to cli.commandCount, "timings" to cli.timingSummary))
+            "matchingExecutionsPerVersion" to 1, "continuationChecked" to true, "commands" to cli.commandCount, "timings" to cli.timingSummary))
     }
 
     @Test fun `map and oneof metadata remain unknown with every configured target retained`() {
@@ -206,7 +210,6 @@ class ProtoIntegrationTest {
             val config = config(owner, "v2", marker, targets)
             val started = cli.execute("$owner-run", "analysis", "run", "--method", "messages.proto-relations", "--config", config,
                 "--work", cli.output.resolve("$owner-workspace")).asJsonObject
-            assertEquals("COMPLETE", started["state"].asString, "Invalid selected targets are reported and do not demand meaningless Review")
             val dir = Path.of(started["runPath"].asString)
             val run = cli.read<AnalysisRun>(dir.resolve("run.json"))
             assertEquals(2, run.tasks.size)
@@ -220,7 +223,9 @@ class ProtoIntegrationTest {
                 items = listOf(AnalysisReview(task.taskId, task.resolution!!.resolutionId, task.rule.revisionId, ReviewAction.ACCEPT,
                     "MustNotPublish", Confidence.HIGH, "Deliberate invalid acceptance attempt."))))
             cli.execute("$owner-reject-review", "analysis", "submit", "--run", dir, "--review", review, expectedExit = 2)
-            val knowledge = Path.of(started["knowledgePath"].asString)
+            val out = cli.output.resolve("$owner-published")
+            cli.execute("$owner-publish", "analysis", "publish", "--run", dir, "--out", out)
+            val knowledge = out.resolve("knowledge.json")
             val facts = PublishedFixtureAssertions.verify(cli, apk("v2"), knowledge, oracles.getValue("v2"), emptyMap(), parentTruth(owner))
             assertTrue(facts.entries.isEmpty())
             assertEquals(listOf("tiny\t2\t0\tobfuscated\tnamed"), Files.readAllLines(knowledge.parent.resolve("mapping.tiny")))

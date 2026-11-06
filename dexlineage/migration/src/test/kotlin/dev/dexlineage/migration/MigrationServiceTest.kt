@@ -156,6 +156,49 @@ class MigrationServiceTest {
         Files.writeString(f.dir.resolve(records.first().javaPath), "tampered")
         assertFailsWith<ValidationException> { MigrationService.inspect(f.dir, setOf("item-0")) }
     }
+    @Test fun `packet includes invalid tasks but only drafts unique current results`() {
+        val f = fixture()
+        val out = temp.resolve("packet")
+        val manifest = ReviewPackets.write(f.dir, emptySet(), out)
+        assertEquals(listOf("item-0", "item-1"), manifest.taskIds)
+        assertEquals(manifest, ReviewPackets.validate(out, f.dir))
+        val packet = JsonFiles.read(out.resolve("review-packet.json"), MigrationReviewPacket::class.java)
+        assertEquals(setOf(TaskState.UNREVIEWED, TaskState.INVALID), packet.tasks.map { it.state }.toSet())
+        assertEquals(packet.sharedEvidence.size, packet.sharedEvidence.map { it.evidenceId }.distinct().size)
+        val first = packet.tasks.first()
+        assertEquals(setOf(f.run.tasks[0].entry.binding, f.run.tasks[0].resolution!!.uniqueRef),
+            packet.sharedEvidence.filter { it.evidenceId in first.requiredEvidenceIds }.map { it.ref }.toSet())
+        val template = com.google.gson.JsonParser.parseString(Files.readString(out.resolve("review-template.json"))).asJsonObject
+        assertEquals(f.run.knowledge.knowledgeId, template["sourceKnowledgeId"].asString)
+        val draft = template.getAsJsonArray("items").single().asJsonObject
+        assertEquals("item-0", draft["taskId"].asString)
+        assertTrue(draft["action"].isJsonNull)
+        assertTrue(draft["level"].isJsonNull)
+        assertTrue(draft["nameStillApplies"].isJsonNull)
+        assertFalse(draft.has("name"))
+        assertFailsWith<ValidationException> { MigrationService.submit(f.dir, out.resolve("review-template.json")) }
+        assertTrue(ReviewStore.latest(f.dir, f.run.runId).isEmpty())
+    }
+    @Test fun `packet evidence files cannot be replaced or silently rebound`() {
+        val f = fixture()
+        val out = temp.resolve("packet")
+        ReviewPackets.write(f.dir, setOf("item-0"), out)
+        val packet = JsonFiles.read(out.resolve("review-packet.json"), MigrationReviewPacket::class.java)
+        assertFailsWith<ValidationException> { ReviewPackets.validate(out, f.dir, setOf("item-1")) }
+        Files.writeString(Path.of(packet.sharedEvidence.first().javaFile.path), "replaced code")
+        assertFailsWith<ValidationException> { ReviewPackets.validate(out, f.dir, setOf("item-0")) }
+    }
+    @Test fun `legacy run omits execution markers and keeps its fingerprint`() {
+        val f = fixture()
+        val raw = com.google.gson.JsonParser.parseString(Files.readString(f.dir.resolve("run.json"))).asJsonObject
+        assertFalse(raw.has("dependencyEvaluation"))
+        assertFalse(raw.has("resolvedAnchors"))
+        assertFalse(raw.has("evaluatedRules"))
+        assertEquals(f.run.runId, MigrationService.readRun(f.dir).fingerprint())
+        val changed = f.run.copy(dependencyEvaluation = "unknown")
+        Files.writeString(f.dir.resolve("run.json"), JsonFiles.encode(changed.copy(runId = changed.fingerprint())))
+        assertFailsWith<ValidationException> { MigrationService.readRun(f.dir) }
+    }
     @Test fun `APK changes cannot be hidden by persisted queue or source knowledge`() {
         val f = fixture()
         Files.writeString(Path.of(f.run.sourceApk.path), "changed APK")

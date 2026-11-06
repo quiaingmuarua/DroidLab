@@ -3,7 +3,8 @@ package dev.dexlineage.cli
 import dev.dexlineage.analysis.AnalysisService
 import dev.dexlineage.analysis.ResearchService
 import dev.dexlineage.analysis.ReviewPackets
-import dev.dexlineage.analysis.workspace.WorkspaceService
+import dev.dexlineage.analysis.OneShotAnalysis
+import dev.dexlineage.migration.ReviewPackets as MigrationReviewPackets
 import dev.dexlineage.migration.MigrationService
 import dev.dexlineage.io.*
 import dev.dexlineage.knowledge.KnowledgeFiles
@@ -14,20 +15,18 @@ import kotlin.system.exitProcess
 
 private const val HELP = """DexLineage 0.4.0
   analysis run       --method <messages.grpc|messages.proto-relations|profile> --config <config.json> --work <new-directory>
-  analysis status    --work <directory>
-  analysis resume    --work <directory>
   analysis import-jadx --apk <apk> --project <project.jadx> --out <new-directory>
   analysis targets   --corpus <corpus.json> [--run <directory>] [--state ...] [--offset N] [--limit N]
   analysis research  --corpus <corpus.json> --target <target-id,...> --out <new-directory>
   analysis discover  --apk <apk> --profile <profile.json> --out <new-directory> [--base-knowledge <knowledge.json>]
   analysis prepare   --apk <apk> --rules <rules.json> --run <new-directory> [--corpus <corpus.json>] [--base-knowledge <knowledge.json>] [--reference-knowledge <knowledge.json> ...]
   analysis tasks     --run <directory> [--state UNREVIEWED|ACCEPTED|REJECTED|DEFERRED|INVALID|ALL] [--offset N] [--limit N] [--service <exact-service> ...]
-  analysis inspect   --run <directory> --task <task-id,...> [--out <new-directory>]
+  analysis inspect   --run <directory> [--task <task-id,...>] --out <new-directory>
   analysis submit    --run <directory> --review <review-batch.json>
   analysis publish   --run <directory> --out <new-directory> [--at <previous-report.json>]
   migration prepare  --knowledge <knowledge.json> --source-apk <apk> --target-apk <apk> --run <new-directory> [--min-confidence HIGH] [--rules <overrides.json>] [--target-base <knowledge.json>]
   migration tasks    --run <directory> [--state ...] [--offset N] [--limit N]
-  migration inspect  --run <directory> --task <task-id,...> [--candidate <task-id=Lclass;,...> ...]
+  migration inspect  --run <directory> [--task <task-id,...>] [--out <new-directory>] [--candidate <task-id=Lclass;,...> ...]
   migration submit   --run <directory> --review <review-batch.json>
   migration publish  --run <directory> --out <new-directory> [--at <previous-report.json>]
   knowledge verify   --knowledge <knowledge.json> --apk <apk> --work <directory>
@@ -58,7 +57,7 @@ fun runCli(args: Array<String>): Int = try {
                 "analysis tasks" -> setOf("--run", "--state", "--offset", "--limit", "--service")
                 "migration tasks" -> setOf("--run", "--state", "--offset", "--limit")
                 "analysis inspect" -> setOf("--run", "--task", "--out")
-                "migration inspect" -> setOf("--run", "--task", "--candidate")
+                "migration inspect" -> setOf("--run", "--task", "--candidate", "--out")
                 "analysis submit", "migration submit" -> setOf("--run", "--review")
                 "analysis publish", "migration publish" -> setOf("--run", "--out", "--at")
                 "migration prepare" -> setOf("--knowledge", "--source-apk", "--target-apk", "--run", "--min-confidence", "--rules", "--target-base")
@@ -91,9 +90,8 @@ fun runCli(args: Array<String>): Int = try {
                 return selections
             }
             val result: Any = when ("$scene $operation") {
-                "analysis run" -> WorkspaceService.run(value("--method"), path("--config"), path("--work"))
-                "analysis status" -> WorkspaceService.status(path("--work"))
-                "analysis resume" -> WorkspaceService.resume(path("--work"))
+                "analysis run" -> OneShotAnalysis.run(value("--method"), path("--config"), path("--work"))
+                "analysis status", "analysis resume" -> throw ValidationException("Analysis workspace recovery was retired. Use analysis tasks/inspect --run <completed-run>, then submit/publish explicitly. For interrupted execution, start analysis run in a new --work directory. Old workspaces require their historical tool commit.")
                 "analysis import-jadx" -> AnalysisService.importJadx(path("--apk"), path("--project"), path("--out"))
                 "analysis targets" -> AnalysisService.targets(path("--corpus"), options["--run"]?.single()?.let(Path::of), options["--state"]?.single(), number("--offset", 0), number("--limit", 20))
                 "analysis research" -> ResearchService.research(path("--corpus"), value("--target").split(',').map(String::trim), path("--out"))
@@ -108,7 +106,8 @@ fun runCli(args: Array<String>): Int = try {
                 "analysis tasks" -> AnalysisService.tasks(path("--run"), options["--state"]?.single(), number("--offset", 0), number("--limit", 20),
                     options["--service"]?.toSet()?.let { mapOf("service" to it) }.orEmpty())
                 "analysis inspect" -> options["--out"]?.single()?.let { out ->
-                    ReviewPackets.write(path("--run"), value("--task").split(',').toSet(), Path.of(out))
+                    val tasks = options["--task"]?.single()?.split(',')?.toSet() ?: AnalysisService.readRun(path("--run")).tasks.map { it.taskId }.toSet()
+                    ReviewPackets.write(path("--run"), tasks, Path.of(out))
                 } ?: AnalysisService.inspect(path("--run"), value("--task").split(',').toSet())
                 "analysis submit" -> AnalysisService.submit(path("--run"), path("--review"))
                 "analysis publish" -> AnalysisService.publish(path("--run"), path("--out"), options["--at"]?.single()?.let(Path::of))
@@ -124,7 +123,11 @@ fun runCli(args: Array<String>): Int = try {
                     }
                 }
                 "migration tasks" -> MigrationService.tasks(path("--run"), options["--state"]?.single(), number("--offset", 0), number("--limit", 20))
-                "migration inspect" -> MigrationService.inspect(path("--run"), value("--task").split(',').toSet(), selected())
+                "migration inspect" -> options["--out"]?.single()?.let { out ->
+                    requireInput("--candidate" !in options, "Review packets cannot filter candidates")
+                    val tasks = options["--task"]?.single()?.split(',')?.toSet() ?: MigrationService.readRun(path("--run")).tasks.map { it.taskId }.toSet()
+                    MigrationReviewPackets.write(path("--run"), tasks, Path.of(out))
+                } ?: MigrationService.inspect(path("--run"), value("--task").split(',').toSet(), selected())
                 "migration submit" -> MigrationService.submit(path("--run"), path("--review"))
                 "migration publish" -> MigrationService.publish(path("--run"), path("--out"), options["--at"]?.single()?.let(Path::of))
                 "knowledge verify" -> {

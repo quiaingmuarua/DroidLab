@@ -79,7 +79,8 @@ data class Resolution(val schemaVersion: Int = SCHEMA_VERSION, val resolutionId:
     val uniqueMethod: MethodRef? get() = uniqueEntity?.method
 }
 data class ResolutionBatch(val resolutions: Map<String, Resolution>, val scan: ScanResult, val analysis: FieldAnalysis?,
-    val waiting: Map<String, List<String>> = emptyMap(), val artifacts: List<ScenarioArtifactRef> = emptyList())
+    val waiting: Map<String, List<String>> = emptyMap(), val artifacts: List<ScenarioArtifactRef> = emptyList(),
+    val resolvedAnchors: Map<String, SupportAnchor> = emptyMap(), val evaluatedRules: List<String> = emptyList())
 
 data class KnowledgeEvidence(val evidenceId: String, val ref: ClassRef, val javaPath: String, val javaSha256: String,
     val smaliPath: String?, val smaliSha256: String?, val incomplete: Boolean, val diagnostics: List<String>)
