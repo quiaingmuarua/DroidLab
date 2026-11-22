@@ -4,6 +4,13 @@
 library. Use the single DroidLab root Gradle build and wrapper; do not add a
 nested settings file or wrapper.
 
+Maintain these public samples here only; do not maintain synchronized
+DroidWorks copies. Keep HTTP, Duck and optional Worker behavior without
+introducing DroidWorks private gateway or Runtime deployment dependencies.
+See [source migration](../docs/SOURCE_MIGRATION.md#android-labs-maintenance-ownership)
+for the audited source boundary. Unit tests, assembly and APK export remain
+separate from actual device, hook or remote Worker acceptance.
+
 ## Module choice
 
 - `detect-env`: environment checks, fingerprints, anti-analysis signals and
