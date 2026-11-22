@@ -1,8 +1,9 @@
 # Source migration
 
 The exact input repositories and commits are recorded in
-[source-imports.json](source-imports.json). They were imported as tracked-source
-snapshots; source checkouts were not renamed, edited, deleted or archived.
+[source-imports.json](source-imports.json). During that import they were copied
+as tracked-source snapshots; source checkouts were not renamed, edited, deleted
+or archived by the import.
 
 | Source | DroidLab destination |
 | --- | --- |
@@ -17,6 +18,32 @@ private deployment proof were excluded. The public App snapshot omits
 behavior, optional Worker configuration, package names and native interfaces
 remain. No private research data or historical run conversion is part of this
 change.
+
+## Android labs maintenance ownership
+
+`labs/` is the sole maintenance location for the three public Android labs.
+Their HTTP capabilities, Duck integration and optional Worker configuration
+remain. The paired DroidWorks convergence retires its copied App modules and
+sample-specific report/deployment declarations. Private gateway access,
+Runtime deployment and private proof orchestration do not move here. The
+sample-specific Xposed modules remain in DroidWorks for optional manual use.
+DroidWorks' normal build and CI do not fetch or build DroidLab source or APKs.
+Existing immutable historical fixtures keep their recorded origins.
+
+The 2026-11-22 audit compared the historical import
+`9fc7c0017a0ca9447af99465d168d1c613d554ca`, DroidWorks
+`4f4aa8f97fcce41606d7fedffe3afb2bbce528ae`, and DroidLab
+`3c3ca80c4379cb5609cf6dc5b50331539fed3f2a`. All 280 public import files are
+present: detect-env 106, android-lab 123 and crackme-native-lib 51. Of those,
+274 retain the exact Git blob; six differences are documentation and build
+adaptations. App code, manifests, resources and native code match the import.
+The five private Host proof files were deliberately excluded. The later
+DroidWorks gateway implementation and its test were not in the import baseline
+and are not copied into the public samples.
+
+`source-imports.json`, existing dependency locks and historical fixture
+identities remain unchanged. This is source-completeness evidence; unit/build,
+device, hook and Worker outcomes are separate verification claims.
 
 All development now uses the single DroidLab build. DexLineage's five modules
 are `:dexlineage:*`, its fixture is `:dexlineage:fixture-apk`, and public Apps
