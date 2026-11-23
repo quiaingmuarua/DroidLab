@@ -6,7 +6,7 @@
 |---|---|---|
 | `analysis` | Manual corpus, discovery, current-APK targets, symbol dependencies, naming review and publication | `knowledge`, `jadx` |
 | `migration` | Fixed-target continuity, rule overrides, unresolved carry-forward and publication | `knowledge`, `jadx` |
-| `knowledge` | Version data, original CLASS/METHOD identities, rules, anchors, dependency proofs, evidence and review journal | None |
+| `knowledge` | Version data, original CLASS/METHOD/FIELD identities, rules, anchors, dependency proofs, evidence and review journal | None |
 | `jadx` | Raw DEX facts, explicit strategy registry, public facts, code rendering, Tiny and Mapping readback | `knowledge` |
 | `cli` | Scene commands, distribution and explicit integration checks | `analysis`, `migration`, `jadx` |
 
@@ -53,7 +53,7 @@ For a field locator, the anchor must occur in that initialization call. Strings 
 
 Unsupported kinds and parameter combinations are configuration errors. Unreadable initialization remains UNKNOWN; it does not fall back to accepting a class-level string coincidence. Known incompatible or non-string values fail. Partial methods elsewhere in a class do not automatically invalidate readable field facts.
 
-A `RuleRevision` stores a strategy ID, parameters, CLASS/METHOD result kind, dependency roles and its content-derived `revisionId`. Existing locator lists are represented by `builtin.locators`; coded strategies use their own parameters and cannot simultaneously supply locators. `ResolutionEngine` validates and batches the ready rules. There is no expected-owner input. Its `engineBuildId` hashes actual project class contents from the knowledge/JADX artifacts, including compiled recipe code, while ignoring absolute locations and ZIP timestamps.
+A `RuleRevision` stores a strategy ID, parameters, CLASS/METHOD/FIELD result kind, dependency roles and its content-derived `revisionId`. Existing locator lists are represented by `builtin.locators`; coded strategies use their own parameters and cannot simultaneously supply locators. `ResolutionEngine` validates and batches the ready rules. There is no expected-owner input. Its `engineBuildId` hashes actual project class contents from the knowledge/JADX artifacts, including compiled recipe code, while ignoring absolute locations and ZIP timestamps.
 
 Alternative locators are OR alternatives for one semantic target: all execute, their evidence remains separate, and candidates merge by original class identity. There is no first-hit preference, confidence voting or review-dependent candidate removal.
 
@@ -67,11 +67,11 @@ Alternative locators are OR alternatives for one semantic target: all execute, t
 
 Several fields/locators supporting one class still identify one entity. A PASS and UNKNOWN relation for the same entity can remain UNIQUE when no relevant unresolved path remains; its unknown diagnostics are retained. Renaming one task, rejecting another, reviewing only part of the queue or changing submission order cannot change these results.
 
-METHOD results use the full owner plus original method name and descriptor. Two methods in the same class remain two entities. `Resolution.uniqueRef` only returns CLASS results; `uniqueEntity` covers both supported result kinds. An anchor has no Rename alias and cannot become a Mapping row merely because it is unique.
+METHOD identities include the exact declaring owner, original method name and full descriptor. FIELD identities include the exact declaring owner, original field name and type. Distinct methods or fields on one owner remain distinct entities. `Resolution.uniqueRef` only returns CLASS results. `uniqueEntity` covers all three result kinds. An anchor has no Rename alias and cannot become a Mapping row merely because it is unique.
 
 ## Compiled strategies and dependencies
 
-The core registers `builtin.locators` and `builtin.method-signature`. Project handlers declare an opaque ID, result kind, dependency roles, parameter/producer validation, scan needs and evidence requirements. `requires` resolves current-APK CLASS/METHOD symbols in one execution; failed prerequisites leave dependants blocked. A handler returns matching facts and typed scene artifacts; shared policy alone builds Resolution and controls publication.
+The core registers `builtin.locators` and `builtin.method-signature`. Project handlers declare an opaque ID, result kind, dependency roles, parameter/producer validation, scan needs and evidence requirements. `requires` resolves current-APK CLASS/METHOD/FIELD symbols in one execution; failed prerequisites leave dependants blocked. A handler returns matching facts and typed scene artifacts; shared policy alone builds Resolution and controls publication.
 
 Public `ApkFacts` sessions share the existing full APK inventory and demand-driven indices. Only their owner closes a session. Externally compiled code can consume the same bounded analysis without copying a parser or reaching into Kotlin internals.
 
@@ -108,7 +108,7 @@ A discovery profile has `schemaVersion: 4`, `id` and either `discovery` (an exis
 }
 ```
 
-An item may supply `semanticId` to update an existing same-APK entry, `corpusTargetId` to link a manual target, or `strategy` instead of `locators`. Top-level `anchors` declare support rules by `key`; these may return CLASS or METHOD. Rename items must return CLASS. See the [external dependency example](../examples/external/README.md). A discovery-generated file also contains `discovery: {path, sha256}` and `discoveryKey` per linked item. The frozen discovery provides its original owner; after unrestricted rule execution, the unique result must agree with that owner. No handwritten expected target is accepted. New rules can also be authored directly without discovery.
+An item may supply `semanticId` to update an existing same-APK entry, `corpusTargetId` to link a manual target, or `strategy` instead of `locators`. Top-level `anchors` declare support rules by `key`; these may return CLASS, METHOD or FIELD. Rename items must return CLASS. See the [external dependency example](../examples/external/README.md). A discovery-generated file also contains `discovery: {path, sha256}` and `discoveryKey` per linked item. The frozen discovery provides its original owner; after unrestricted rule execution, the unique result must agree with that owner. No handwritten expected target is accepted. New rules can also be authored directly without discovery.
 
 With `--base-knowledge`, Analysis freezes a same-APK knowledge revision. It reuses IDs by original current binding, publishes accepted updates plus unchanged base entries, and retains historical unresolved items. Failed attempts remain visible in run/report without replacing valid base names, bindings or rules. Explicit same-APK pending targets may be retried. Cross-APK pending targets are carried, not silently claimed by name. Moving an existing semantic ID to another entity in the same APK is outside this version.
 

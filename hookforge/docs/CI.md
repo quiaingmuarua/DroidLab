@@ -52,11 +52,25 @@ Python/Node × attach/spawn mechanism cases, then RootBeer with detect-env reuse
 and recovery using the same production bytes. Its report requires complete
 mechanism and shared-API evidence; setup, behavior or cleanup failures fail.
 
-An APK built from current DroidLab `labs/` is a separate input with its own
-build/install hash and integration result. A targeted current-lab result cannot
-be reported as the complete four-case fixed-fixture suite. See the root workflow
-for the selected checks and [Testing Strategy](TESTING_STRATEGY.md) for acceptance.
+The root workflow runs fixed-fixture and current `labs/` APKs as separate inputs.
+Each input runs all four mechanism cases and RootBeer with the corresponding
+detect-env APK, using the same production artifact. The current APK carries its
+own build/install hash and source identity. See the root workflow for selected
+checks and [Testing Strategy](TESTING_STRATEGY.md) for acceptance.
 
 This migration adds no macOS runner or ARM64 CI coverage. The retained ARM64
 tooling can be invoked explicitly in a suitable environment; it does not prove
 that such a machine or workflow is available. See [macOS scope](MACOS_RUNNER.md).
+
+The current root workflow runs on pull requests, main pushes and manual dispatch.
+The planned CI split gives PRs fast feedback from relevant host checks and
+builds, and uses nightly proof for representative public tasks, real target
+results, reuse and recovery. These are implementation goals for a later CI change.
+
+The first planned proof uses the [linked CLI case](../cases/composable/README.md#linked-cli-real-apk-proof)
+to execute the actual `af-frida` command against fixed RootBeer and Duck inputs.
+It needs production-manifest and environment attribution, bounded task shutdown,
+and failure propagation into the nightly result. Record the verified commit,
+artifact, APKs, toolchain, Android/ABI, verification time and evidence together.
+That executed proof provides the basis for changing PR device-task routing and
+retaining selected migration baselines beyond ordinary run-artifact retention.

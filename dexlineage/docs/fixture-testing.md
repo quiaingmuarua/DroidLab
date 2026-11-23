@@ -12,10 +12,10 @@ Run commands from the DroidLab root using JDK 21 and its single committed Wrappe
 
 Use `.\gradlew.bat :dexlineage:fixtureIntegrationTest` on Windows PowerShell. This explicit task builds the root-owned `:dexlineage:fixture-apk` Android application module, exports each Release variant through `SingleArtifact.APK` to `dexlineage/fixtures/android/build/fixture-inputs/<variant>/`, installs the CLI, validates the generated fixture, then runs the `fixture-integration` test group. Export requires exactly one APK from the Android artifact metadata; tests do not guess `outputs/apk` or `intermediates/apk` paths. The `:dexlineage:test`, `:dexlineage:check` and `:dexlineage:build` tasks exclude that group; pass `-Pandroid=false` for JVM-only work without an Android SDK. Project-specific acceptance tasks live with their extension implementations.
 
-To build only the Android module:
+To build and export the fixture APK inputs with the fixture R8 profile, run
 
 ```sh
-./gradlew :dexlineage:fixture-apk:assembleV1Release :dexlineage:fixture-apk:assembleV2Release
+./gradlew :dexlineage:cli:buildFixtureApks
 ```
 
 For source editing, open the repository root in Android Studio and sync with the root Wrapper and JDK 21. `:dexlineage:fixture-apk` is a standard Android application module at `dexlineage/fixtures/android`, with `v1` and `v2` product flavors. Android modules are enabled by default for IDE and command-line use. Pass `-Pandroid=false` for JVM/Node-only work; fixture tasks explicitly fail in that mode. Use `-Pandroid=true` to enable Android explicitly. Only the root `settings.gradle.kts` owns the module graph.
@@ -93,4 +93,4 @@ Public command records and run packages are under `dexlineage/cli/build/fixture-
 
 `dexlineage/cli/build/fixture-integration/apk-build.json` records elapsed time from SDK preflight through completion of both variant APK exports, excluding Gradle startup/configuration. It changes from STARTED to PASS only after both assemblies succeed; an interrupted or failed assembly leaves STARTED, with the failure in Gradle's task log. Suite reports include consumed class/method counts, rule and Resolution identities, oracle outcomes and command-stage timings. Offline DEX consumption and JADX readback are measured separately. Timings are observations for the current machine/cache state, not performance thresholds.
 
-CI uses immutable Action commit references, JDK 21 and the committed Wrapper. JVM checks run on Ubuntu 24.04 and Windows; APK integration runs on Ubuntu 24.04. Job limits and artifact retention are declared in the root CI workflow. Diagnostic artifacts contain only explicit public build paths. Neither `.local/`, `.runtime/`, private Messages artifacts nor machine SDK configuration is uploaded. A cache miss may cost time, but must not change correctness.
+CI pins Actions with commit SHAs or version tags as declared in the [root workflow](../../.github/workflows/ci.yml), and uses JDK 21 and the committed Wrapper. JVM checks run on Ubuntu 24.04 and Windows; APK integration runs on Ubuntu 24.04. Job limits and artifact retention are declared in that workflow. Diagnostic artifacts contain only explicit public build paths. Neither `.local/`, `.runtime/`, private Messages artifacts nor machine SDK configuration is uploaded. A cache miss may cost time, but must not change correctness.

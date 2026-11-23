@@ -11,6 +11,12 @@ investigation and debugging; new modules or scripts alone do not prove that
 value. Keep common mechanisms and useful experience after actual use shows
 what they save.
 
+Public APKs, CTF challenges and self-authored samples can drive HookForge's own
+research. Retain verified facts, methods for locating relevant behavior and
+repeatable experiments with their sample and tool identities, evidence and limits
+so researchers and agents can reuse them. Private consumers such as DroidResearch
+provide feedback through their own target acceptance.
+
 ## Start with a target
 
 Start with the target outcome and check whether an existing tool or script

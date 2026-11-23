@@ -4,6 +4,10 @@ This note focuses specifically on Android Java access, native API drift, and
 Node-hosted bundle behavior in this workspace. It is not a complete summary of
 every Frida 17 breaking change.
 
+The upstream [Frida 17.0.0 release notes](https://frida.re/news/2025/05/17/frida-17-0-0-released/)
+and [Bridges guide](https://frida.re/docs/bridges/) describe the runtime API
+changes and bridge usage for the official CLI and custom hosts.
+
 This document captures the main breakage we hit while moving the `frida/`
 workspace from the older Frida 16 assumptions to Frida 17 runtime behavior.
 
@@ -15,19 +19,21 @@ Use this file first when:
 
 ## Short Version
 
-The key migration lesson is:
+The original migration established these host differences:
 
-- Frida CLI on Android still exposes a usable global `Java`
+- Frida CLI on Android exposed a usable global `Java`
 - Node-hosted `session.createScript()` bundles should not assume global `Java`
 - Node-hosted bundles must access Java through a facade backed by
   `frida-java-bridge`
 
-The workspace now enforces that rule through:
+Current bundled code shares the implementation in `packages/runtime/java-bridge.ts`.
+`packages/core/java-bridge.ts` re-exports it for existing callers. The loader,
+shared API runtime and managed extensions use this same bridge instance.
 
-- `packages/core/java-bridge.ts`
-- `packages/core/env.ts`
-- `packages/core/java-utils.ts`
-- `packages/loader/index.ts`
+The current setup also initializes the Application ClassLoader and App-private
+DEX cache paths, and applies the reviewed ART patch to the exact pinned bridge.
+The [current initialization and patch checks](#current-initialization-and-patch-checks)
+below cover those later fixes.
 
 ## Before vs After
 
@@ -51,7 +57,7 @@ for Node-hosted bundles under Frida 17.
 The current code uses an explicit facade:
 
 ```ts
-import { Java, isJavaAvailable, performOnJava } from '../core/java-bridge';
+import { Java, isJavaAvailable, performOnJava } from '@runtime/java-bridge';
 
 if (isJavaAvailable()) {
   await performOnJava(() => {
@@ -94,28 +100,32 @@ We confirmed that:
 - CLI path still had usable global `Java`
 - explicit `import Java from 'frida-java-bridge'` worked in Node-created bundles
 
-So the real fix was not "wait longer for Java", but "stop depending on global
-Java in Node-injected bundles".
+Explicit bridge access resolved this migration issue in Node-injected bundles.
 
 ## Fix Applied
 
 ### 1. Upgrade runtime dependencies
 
-The Node workspace was upgraded from Frida 16-era assumptions to Frida 17-era
-dependencies:
+The current package declarations retain the Frida 17 client range and pin the
+reviewed Java bridge exactly:
 
 - `frida`: `^17.4.0`
-- `frida-java-bridge`: `^7.0.13`
+- `frida-java-bridge`: `7.0.13`
+
+Use the installed versions from `package-lock.json` and the matching server in
+`test/api33/toolchain.lock.json`. Root `:hookforge:npmCi` installs the locked
+dependencies and applies the bridge patch through `postinstall`.
 
 ### 2. Introduce a Java facade
 
-`packages/core/java-bridge.ts` is now the only supported entry point for Java
-bridge access inside the bundled agent.
+`packages/runtime/java-bridge.ts` owns Java bridge access inside the bundled
+agent. The core path remains a compatibility re-export of that implementation.
 
 It provides:
 
 - `Java`
 - `isJavaAvailable()`
+- `initializeJavaClassLoader()`
 - `performOnJava()`
 
 ### 3. Migrate shared runtime helpers
@@ -133,31 +143,31 @@ instead of raw global `Java`.
 
 That change affected:
 
-- `android/runtime-bypass`
-- `android/device-profile`
-- `android/network-observe`
-- `android/validation`
+- `packages/modules/android-runtime-bypass`
+- `packages/modules/android-device-profile`
+- `packages/modules/android-network-observe`
+- `packages/modules/android-validation`
 
 ### 5. Adjust Frida 17 native API assumptions
 
-One follow-up breakage showed up in `android/runtime-bypass`.
+One follow-up breakage showed up in the runtime-bypass module.
 
 Older assumptions expected:
 
 - `Module.findExportByName('libc.so', 'fopen')`
 
-But on the current Frida 17 runtime we verified that:
+The Frida 17 runtime used during that investigation had these APIs:
 
 - `Module.findExportByName` is not present
 - global export lookup is exposed through `findGlobalExportByName` or
   `getGlobalExportByName`
 
-The native root bypass path now resolves exports through that Frida 17 shape
-instead of assuming the older static helper still exists.
+`packages/runtime/native-bridge.ts` resolves exports through those global lookup
+methods, with a legacy lookup fallback when that API is available.
 
 ### 6. Tighten SIM fallback merge rules
 
-`android/device-profile` also needed a data-quality fix during the migration.
+The device-profile module also needed a data-quality fix during the migration.
 
 We saw a split where:
 
@@ -171,14 +181,52 @@ The collector now treats system-property SIM values as fallback-only:
 - they do not overwrite TelephonyManager results
 - placeholder strings such as `","` are ignored
 
+## Current Initialization and Patch Checks
+
+Bridge availability and Application readiness have separate checks.
+`initializeJavaClassLoader()` uses `Java.performNow` and
+`ActivityThread.currentApplication()` to obtain the App loader. It sets the
+App's writable `cacheDir` and `codeCacheDir` before publishing that loader.
+Setting only the loader can leave `/data/local/tmp` as the DEX output path,
+which a newly installed non-root App cannot write. Initialization has a
+deadline and cancellation support. `performOnJava()` also propagates synchronous
+throws from deferred callbacks and rejected asynchronous work.
+
+The reviewed bridge patch addresses an ART Nterp entry-point synchronization
+window observed during API33 ARM64 spawn tests. After instrumentation setup it
+flushes pending Interceptor changes and synchronizes registered replacement
+methods. The patch installer checks the exact package, lock identity and file
+hashes. This historical observation does not add ARM64 CI coverage. Details and
+source/output hashes are in the [bridge patch guide](../patches/README.md).
+
+After dependency installation, check the installed patch without modifying it:
+
+```bash
+npm --prefix hookforge run check:bridge-patch
+```
+
+For spawn-time Java failures, inspect loader/cache initialization and the patch
+check alongside bridge exposure. Keep managed adapters on the shared bridge
+export supplied by the public bundle. See the
+[Script Integration Guide](SCRIPT_INTEGRATION_GUIDE.md#runtime-owners).
+
 ## Validation Commands
 
-Use these commands in order when debugging a future Frida upgrade.
+Run from the DroidLab root with Node from `hookforge/.node-version` on PATH.
+Prepare and verify host checks and production artifacts first:
+
+```bash
+./gradlew -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact
+```
+
+PowerShell uses `./gradlew.bat`. The device commands below need the matching
+Frida server and an installed target. Direct CLI smoke also needs the matching
+Frida CLI on PATH. See [API33 preparation and replay](../test/api33/README.md).
 
 ### Step 1: verify CLI path
 
 ```bash
-npm.cmd --prefix hookforge run test:smoke:settings
+frida -q -Uf com.android.settings -l hookforge/test/simple_smoke.js
 ```
 
 If this fails, the problem is not specific to the Node host.
@@ -186,8 +234,8 @@ If this fails, the problem is not specific to the Node host.
 ### Step 2: verify Node host transport path
 
 ```bash
-npm.cmd --prefix hookforge run test:node:smoke:settings:spawn
-npm.cmd --prefix hookforge run test:node:smoke:settings:frontmost
+npm --prefix hookforge run test:node:smoke:settings:spawn
+npm --prefix hookforge run test:node:smoke:settings:frontmost
 ```
 
 If these fail before loader logs appear, check Frida client/server compatibility
@@ -196,25 +244,27 @@ and host-side attach or spawn flow first.
 ### Step 3: verify Java bridge exposure in Node
 
 ```bash
-npm.cmd --prefix hookforge run test:node:probe:java
+npm --prefix hookforge run test:node:probe:java
 ```
 
-If this shows missing global Java but the facade path still works, do not
-rewrite modules back to global `Java`.
+This reports global Java exposure in a bare Node-created Script. Compare it
+with the facade-backed Node smoke in Step 2. For failures after VM availability,
+inspect `initializeJavaClassLoader()` and writable App cache paths. For
+replacement-method failures, verify the reviewed bridge patch.
 
-### Step 4: verify workspace health
+### Step 4: verify shared API behavior
 
 ```bash
-npm.cmd --prefix hookforge run type-check
-npm.cmd --prefix hookforge run build
-npm.cmd --prefix hookforge run test:unit
+npm --prefix hookforge run case:rootbeer -- \
+  --apk /absolute/path/rootbeer-sample-0.9.apk --serial emulator-5554 --reuse-detect-env \
+  --agent /absolute/path/DroidLab/hookforge/dist/android-api.js \
+  --production-manifest /absolute/path/DroidLab/.runtime/hookforge/production-manifest.json \
+  --output /absolute/path/DroidLab/.runtime/frida/rootbeer-regression
 ```
 
-### Step 5: verify native hook path
-
-```bash
-npm.cmd --prefix hookforge run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
-```
+Use absolute paths and a new output directory. The case requires its fixed
+RootBeer APK and an installed detect-env App for reuse; see the
+[RootBeer case guide](../cases/rootbeer/README.md).
 
 This observes actual APK callers and verifies configured positive/negative
 Java file and libc `fopen` behavior through the original RootBeer and detect-env
@@ -227,7 +277,7 @@ When editing Android-focused Frida modules in this workspace:
 
 - do not assume `globalThis.Java` exists
 - do not gate Android support on raw `typeof Java !== 'undefined'`
-- use `packages/core/java-bridge.ts`
+- use `packages/runtime/java-bridge.ts`; existing core imports re-export it
 - prefer `performOnJava()` over ad-hoc Java scheduling
 - treat CLI success and Node host success as separate validation layers
 
@@ -236,7 +286,7 @@ When editing Android-focused Frida modules in this workspace:
 - `frontmost attach` is a better first smoke target for Java-heavy debugging
   when early `spawn` timing is noisy
 - `com.android.settings` is the preferred first Android Node smoke target
-- `crackme:detect-env` is more timing-sensitive and should not be the first
+- `:labs:detect-env` is more timing-sensitive and should not be the first
   target used to debug host or bridge regressions
 - native API shape may drift separately from Java bridge behavior, so treat
   native hook regressions as a separate verification path
@@ -245,13 +295,8 @@ When editing Android-focused Frida modules in this workspace:
 
 ## If Frida 18+ Breaks Again
 
-Debug in this order:
-
-1. confirm CLI still works
-2. confirm Node host transport still works
-3. check whether global `Java` disappeared or changed shape
-4. update only the facade layer first
-5. avoid mass rewrites in individual modules until the facade is confirmed
-
-The goal is to keep future upgrades localized to the bridge boundary instead of
-spreading version-specific assumptions across every hook module.
+Repeat the validation sequence above using the selected dependency lock and
+matching server. Locate failures in transport, bridge exposure, App loader/cache
+initialization, ART replacement setup or native export lookup before editing
+individual hooks. Keep version-specific changes in the corresponding runtime
+owner and rerun the affected target behavior and restoration checks.

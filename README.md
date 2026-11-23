@@ -14,6 +14,13 @@ Start with [AGENTS.md](AGENTS.md), then the relevant component guide. Tools keep
 their own runtime contracts; public integration belongs here and private
 research belongs in its consuming workspace.
 
+Public APKs, CTF challenges and self-authored samples can drive tool development
+here. Keep verified facts, methods for locating relevant behavior and repeatable
+experiments with their evidence and limits. DroidResearch consumes pinned tool
+revisions for private real-App research. DroidWorks independently maintains its
+Xposed modules, App capabilities, Worker integration, deployment and long-running
+operation.
+
 ## Requirements
 
 - JDK 21 and the committed Gradle Wrapper.

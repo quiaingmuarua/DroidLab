@@ -50,6 +50,15 @@ yet a CI gate; the automated proof scopes below remain unchanged. Retain the
 existing RootBeer + detect-env regression with the same public bundle when
 changing these shared hooks.
 
+The local [Duck Build/profile case](../cases/duck-build-profile/README.md) adds
+selected main-process Build/property composition evidence. It uses the existing
+App startup/session and original dual-detector HTTP reports, checks actual
+three-source property calls, a deliberately inconsistent configuration, original
+Build findings and restoration after unload/cold start. Field readback alone is
+not behavior acceptance. Remaining virtualization findings are preserved. This
+case adds no CI job or automatic Duck gate; shared API changes still require
+the existing RootBeer + detect-env regression with the same public bytes.
+
 ## Two Proof Scopes
 
 The local [Reveny case](../cases/reveny-system-properties/README.md) exercises
@@ -120,18 +129,29 @@ over exact event counts, timing, URLs or device identifiers for those targets.
 
 ## Automated Gates
 
-From the DroidLab root, `./gradlew -Pandroid=false :hookforge:check` invokes
-`npm --prefix hookforge run test:ci`, which runs source types, separate unit-test/agent types, source lint,
-Node unit tests, Python toolchain tests, generated-host consistency and a
-development build. It needs Node from `.node-version` and Python 3.10+; CI pins
-Python 3.11. `API33_PYTHON` can select the tool-test interpreter on either OS.
+Run the host gate and production verification from the DroidLab root:
+
+```bash
+./gradlew -Pandroid=false :hookforge:check :hookforge:verifyProductionArtifact
+```
+
+PowerShell uses `./gradlew.bat`. The check needs Node from
+`hookforge/.node-version` and Python 3.10+; CI pins Python 3.11. `API33_PYTHON`
+can select the tool-test interpreter on either OS. Root Gradle installs locked
+Node dependencies and the reviewed bridge patch. `:hookforge:check` invokes
+`npm --prefix hookforge run test:ci`, which runs source types, separate
+unit-test/agent types, source lint, Node unit tests, Python toolchain tests,
+generated-host consistency and a development build.
 
 `npm --prefix hookforge run build:prod` creates `dist/bundle.js`, `dist/android-api.js` and `dist/node-cli/*.js` without
 overwriting committed development hosts. `artifact:write` and `artifact:verify`
 carry/check exact production bytes between the host and emulator jobs. Prefer
 root `:hookforge:verifyProductionArtifact`, which orders production after any
-requested development check and places the manifest in root `.runtime/hookforge`.
+requested development check and places the manifest at
+`.runtime/hookforge/production-manifest.json` under the DroidLab root.
 Manifest `commit` and report `checkoutCommit` identify the owning DroidLab commit.
+This host gate does not execute device acceptance; the dependent device job
+runs the proof scopes below.
 
 The dependent API 33 CI job first runs four controlled-target mechanism cases:
 
@@ -222,7 +242,8 @@ These should validate a module contract, not the whole Android runtime.
 
 Run these on a connected device, emulator, or self-hosted runner:
 
-- attach or spawn against `crackme:detect-env`
+- attach or spawn against the installed `com.detect.app.sample` from a locked
+  fixture or an explicitly selected `:labs:detect-env` build
 - spoof validation against DetectApp target flows
 - system-app smoke tests such as calculator, browser, or messaging targets
 
@@ -230,52 +251,41 @@ This layer validates real runtime behavior and timing.
 
 ## Recommended Target Roles
 
-- `crackme:detect-env`
+- `:labs:detect-env` / `com.detect.app.sample`
   Primary integration target for anti-Frida, fingerprint, spoofing, and validation work.
 
 - system apps
   Secondary smoke targets for stable attach or spawn validation and generic tracing.
 
-## Baseline CI Command
+## Interactive DetectApp Session
 
-The local [Duck Build/profile case](../cases/duck-build-profile/README.md) adds
-selected main-process Build/property composition evidence. It uses the existing
-App startup/session and original dual-detector HTTP reports, checks actual
-three-source property calls, a deliberately inconsistent configuration, original
-Build findings and restoration after unload/cold start. Field readback alone is
-not behavior acceptance. Remaining virtualization findings are preserved. This
-case adds no CI job or automatic Duck gate; shared API changes still require
-the existing RootBeer + detect-env regression with the same public bytes.
-
-Use this as the default GitHub Actions gate for the workspace:
+The retained command opens the configured DetectApp spawn session:
 
 ```bash
-npm.cmd --prefix hookforge run test:ci
+npm --prefix hookforge run test:device:detectapp
 ```
 
-The exact host checks and the two device proof scopes are described above.
-This command alone does not execute device acceptance.
-
-## Device Regression Command
-
-Use this when validating DetectApp behavior on a device:
-
-```bash
-npm.cmd --prefix hookforge run test:device:detectapp
-```
+It delegates to `scripts/test-apps.js detectapp -s`. It does not trigger and
+assert the requested App operation or evaluate a detector verdict. Trigger the
+target operation and inspect its original result to accept a sample task. For
+the existing repeatable shared API checks, use the case guides and API33 replay
+commands linked above.
 
 ## Smoke Targets
 
-Use these for quick device-level sanity checks before debugging a specific module:
+Use these for quick device-level sanity checks before debugging a specific
+module. The legacy `test:smoke:*` scripts below use Windows file paths; run them
+with native Windows Frida tools. Node host scripts also run on the other
+supported hosts with the matching device/server prepared.
 
 ```bash
-npm.cmd --prefix hookforge run test:smoke:messages
-npm.cmd --prefix hookforge run test:smoke:settings
-npm.cmd --prefix hookforge run test:smoke:detectapp
-npm.cmd --prefix hookforge run test:smoke:detectapp:passive
-npm.cmd --prefix hookforge run test:node:smoke:settings:spawn
-npm.cmd --prefix hookforge run test:node:smoke:settings:frontmost
-npm.cmd --prefix hookforge run test:node:probe:java
+npm --prefix hookforge run test:smoke:messages
+npm --prefix hookforge run test:smoke:settings
+npm --prefix hookforge run test:smoke:detectapp
+npm --prefix hookforge run test:smoke:detectapp:passive
+npm --prefix hookforge run test:node:smoke:settings:spawn
+npm --prefix hookforge run test:node:smoke:settings:frontmost
+npm --prefix hookforge run test:node:probe:java
 ```
 
 Recommended usage:
@@ -287,50 +297,22 @@ Recommended usage:
 - `test:node:smoke:settings:frontmost`
   validates the Node host attach path against the current foreground app
 - `test:node:probe:java`
-  validates whether Node-driven `createScript()` exposes the Android Java bridge at all
+  reports global Java exposure in a bare Node-created Script
 - `detectapp`
   stronger crackme-oriented target with more timing sensitivity
 - `detectapp:passive`
   lowest-impact attach check for DetectApp when active probing is unstable
 - `--dump-events`
-  stores structured `trace-event` output under `output/normalized/` for later agent analysis
+  stores structured `trace-event` output by default under
+  `hookforge/.runtime/normalized/` for the positional loader; an explicit file
+  path resolves from the process's working directory (`hookforge/` for the npm
+  commands above)
 
 ## Frida 17 Regression Triage
 
-When a future Frida upgrade breaks Android behavior, debug in this order:
-
-1. CLI smoke
-
-```bash
-npm.cmd --prefix hookforge run test:smoke:settings
-```
-
-2. Node host smoke
-
-```bash
-npm.cmd --prefix hookforge run test:node:smoke:settings:spawn
-npm.cmd --prefix hookforge run test:node:smoke:settings:frontmost
-```
-
-3. Node Java bridge probe
-
-```bash
-npm.cmd --prefix hookforge run test:node:probe:java
-```
-
-4. Shared API behavior through the original App UI
-
-```bash
-npm.cmd --prefix hookforge run case:rootbeer -- --apk "D:\work_app\telegram\RootBeer Sample_0.9_APKPure.apk" --serial emulator-5554 --reuse-detect-env
-```
-
-Interpretation:
-
-- if CLI smoke fails, fix Frida environment or device/server issues first
-- if CLI smoke passes but Node host selects zero Java modules, suspect bridge
-  exposure instead of module selection first
-- if Node probe shows missing global `Java`, do not patch modules back to raw
-  global access; inspect `packages/core/java-bridge.ts` and read
-  `docs/FRIDA_17_MIGRATION.md`
-- if base smoke passes but the real case fails, inspect its API callers,
-  configured values and original UI results before changing the shared hooks
+Use the current sequence in [Frida 17 notes](FRIDA_17_MIGRATION.md#validation-commands)
+to check the host build and production bytes, direct CLI, Node host, shared Java
+bridge and original App behavior. The notes cover Application ClassLoader/cache
+initialization and the exact reviewed ART patch as well as global Java exposure.
+If mechanism smoke passes and a real case fails, inspect its actual API callers,
+configured values and original UI results before changing the shared hooks.

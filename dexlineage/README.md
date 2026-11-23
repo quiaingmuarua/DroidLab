@@ -7,7 +7,7 @@ DexLineage is an APK analysis tool used through its CLI or public JVM library. V
 
 Every new published binding requires a unique, definite result from actual code matching. Multiple candidates are invalid. An Agent can revise the rule and start another run, but cannot choose a candidate through Review text or a HIGH confidence declaration.
 
-Supporting CLASS or METHOD anchors are mechanical matching results, not Rename entries. A UNIQUE anchor is available to dependent rules in the same execution and may be published without a semantic Review. Final class names require review of the owner and the supporting evidence chain. All output Mapping rows remain class-only.
+Supporting CLASS, METHOD or FIELD anchors are mechanical matching results, not Rename entries. A UNIQUE anchor is available to dependent rules in the same execution and may be published without a semantic Review. Final class names require review of the owner and the supporting evidence chain. All output Mapping rows remain class-only.
 
 ## Build from a clean checkout
 
@@ -65,11 +65,11 @@ R8 Mapping is a test-only oracle for independent expected identities. The matche
 
 The verification chain is **R8 APK → coding matching → published knowledge JSON → offline DEX verification → R8 oracle assertions**. The offline consumer takes only the APK and saved knowledge, resolves exact class/method addresses, and returns raw member facts. It does not execute DEX, infer missing bindings from historical entries, or use the oracle to find an entity. These checks establish static identity and rule-reuse regressions, not behavioral equivalence.
 
-CI runs JVM checks on Ubuntu 24.04 and Windows, and the APK suite on Ubuntu 24.04. Public reports, command logs and generated fixture APK/Mapping/configuration are retained as CI artifacts for 14 days. See [fixture maintenance and failure diagnosis](docs/fixture-testing.md). Passing these cases does not establish coverage of all APKs or all obfuscators.
+CI runs JVM checks on Ubuntu 24.04 and Windows, and the APK suite on Ubuntu 24.04. Public reports, command logs and generated fixture APK/Mapping/configuration are retained as CI artifacts according to the [root workflow](../.github/workflows/ci.yml). See [fixture maintenance and failure diagnosis](docs/fixture-testing.md). Passing these cases does not establish coverage of all APKs or all obfuscators.
 
 ## Run an analysis method once
 
-`analysis run` combines the method's prerequisite matching, discovery, target matching and review-packet output in one offline execution. Direct rules need no prerequisite setup. Declared CLASS/METHOD symbols are evaluated in dependency order and reused; no intermediate knowledge publication or stage workspace is created.
+`analysis run` combines the method's prerequisite matching, discovery, target matching and review-packet output in one offline execution. Direct rules need no prerequisite setup. Declared CLASS/METHOD/FIELD symbols are evaluated in dependency order and reused; no intermediate knowledge publication or stage workspace is created.
 
 Copy [the profile configuration](examples/profile-workspace.json) and [logger profile](examples/logger-profile.json) into your project. The historical filename is an input configuration, not a recoverable workspace. Paths resolve from that configuration file.
 
@@ -131,7 +131,7 @@ Investigate selected manual targets before writing rules:
 
 Research reads the corpus's frozen source APK and preserves owner annotations alongside raw class/member identities, strings, direct calls, field accesses and Java/Smali evidence. It batches selected targets, does not recursively explore relationships, and writes `research.json` without creating a matching run. Research can help author a rule; it is not a Resolution, and its evidence cannot be submitted as another run's Review. A partial Java rendering remains explicit while raw DEX reading failures abort the operation.
 
-Dependent rules declare `requires` roles referring to CLASS or METHOD anchors. One prepare evaluates available rules in dependency order, reuses shared symbols and records blocked dependants. A project handler consumes the public facts view and returns candidates, conditions and evidence. It cannot approve names or publish Mapping. The [external example](examples/external/README.md) includes this flow.
+Dependent rules declare `requires` roles referring to CLASS, METHOD or FIELD anchors. One prepare evaluates available rules in dependency order, reuses shared symbols and records blocked dependants. A project handler consumes the public facts view and returns candidates, conditions and evidence. It cannot approve names or publish Mapping. The [external example](examples/external/README.md) includes this flow.
 
 ## Continue Analysis on existing knowledge
 
